@@ -1,0 +1,10 @@
+# Build artifacts
+.build/
+TopBar.app/
+
+# Editors
+.vscode/
+.claude/
+
+# macOS
+.DS_Store
