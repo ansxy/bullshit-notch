@@ -105,7 +105,7 @@ Run the uninstaller script or delete the application:
 Or manually delete `/Applications/TopBar.app` and run:
 
 ```bash
-defaults delete id.rey.topbar
+defaults delete com.ansxy.topbar
 ```
 
 ---

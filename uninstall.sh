@@ -37,7 +37,8 @@ if [[ -d "$HOME/Applications/TopBar.app" ]]; then
 fi
 
 # 3. Clean up preferences if requested
-echo -e "${CYAN}==>${RESET} Cleaning up user preferences (id.rey.topbar)..."
+echo -e "${CYAN}==>${RESET} Cleaning up user preferences (com.ansxy.topbar)..."
+defaults delete com.ansxy.topbar 2>/dev/null || true
 defaults delete id.rey.topbar 2>/dev/null || true
 
 if (( REMOVED == 1 )); then
