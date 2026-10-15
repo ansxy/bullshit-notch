@@ -174,6 +174,7 @@ private struct NotchView: View {
     @AppStorage(Pref.liveBattery) private var liveBattery = true
     @AppStorage(Pref.widthAdjust) private var widthAdjust = 0.0
     @AppStorage(Pref.heightAdjust) private var heightAdjust = 0.0
+    @AppStorage(Pref.idleWidth) private var idleWidth = 48.0
     @AppStorage(Pref.tabHome) private var tabHome = true
     @AppStorage(Pref.tabShelf) private var tabShelf = true
     @AppStorage(Pref.tabTopbar) private var tabTopbar = true
@@ -195,7 +196,12 @@ private struct NotchView: View {
     /// The selected tab, or the first visible one if it was just switched off.
     private var currentTab: NotchTab { visibleTabs.contains(model.tab) ? model.tab : visibleTabs[0] }
 
-    private let wing: CGFloat = 64  // each live-activity "ear" beside the notch
+    private let activeWing: CGFloat = 64  // each live-activity "ear" beside the notch
+    /// Wing width: full width during active HUD/music/agents, or resting width when idle so the notch stays visible.
+    private var wing: CGFloat {
+        activity != .none ? activeWing : max(0, idleWidth / 2)
+    }
+
     /// Closed: a tight notch. Open: smooth water-drop/slime meniscus at top corners, straight sides, rounded bottom.
     private var shape: NotchShape {
         model.expanded
@@ -226,9 +232,8 @@ private struct NotchView: View {
         .clipShape(shape)
         // Hairline rim that fades in from the top, so the flared corners still melt into the bezel.
         .overlay {
-            shape.stroke(LinearGradient(colors: [.clear, .white.opacity(0.16)], startPoint: .top, endPoint: .bottom),
+            shape.stroke(LinearGradient(colors: [.clear, .white.opacity(model.expanded ? 0.16 : 0.08)], startPoint: .top, endPoint: .bottom),
                          lineWidth: 1)
-                .opacity(model.expanded ? 1 : 0)
         }
         .compositingGroup()
         // Open only; subtle shadow and soft ambient accent glow.
@@ -245,6 +250,7 @@ private struct NotchView: View {
         .onChange(of: dropTargeted) { if dropTargeted && tabShelf { model.tab = .shelf } }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
+        .animation(.spring(response: 0.38, dampingFraction: 0.78), value: wing)
         .animation(.spring(response: 0.38, dampingFraction: 0.78), value: activity)
     }
 
@@ -277,9 +283,17 @@ private struct NotchView: View {
 
     private var collapsed: some View {
         HStack(spacing: 0) {
-            if activity != .none { leftWing.frame(width: wing).transition(.opacity) }
+            if wing > 0 {
+                leftWing
+                    .frame(width: wing)
+                    .transition(.opacity)
+            }
             Color.clear.frame(width: notch.width)  // the camera housing itself
-            if activity != .none { rightWing.frame(width: wing).transition(.opacity) }
+            if wing > 0 {
+                rightWing
+                    .frame(width: wing)
+                    .transition(.opacity)
+            }
         }
         .frame(height: notch.height)
         .contentShape(Rectangle())

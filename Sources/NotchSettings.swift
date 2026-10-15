@@ -12,6 +12,7 @@ enum Pref {
     static let replaceHUD = "replaceHUD"
     static let widthAdjust = "notchWidthAdjust"
     static let heightAdjust = "notchHeightAdjust"
+    static let idleWidth = "notchIdleWidth"
     // Show / hide parts of the open notch.
     static let tabHome = "showTabHome"
     static let tabShelf = "showTabShelf"
@@ -31,6 +32,7 @@ enum Pref {
         UserDefaults.standard.register(defaults: [
             openOnHover: true, liveAgents: true, liveMusic: true, liveBattery: true,
             agenda: true, mirror: true, replaceHUD: false, widthAdjust: 0.0, heightAdjust: 0.0,
+            idleWidth: 48.0,
             tabHome: true, tabShelf: true, tabTopbar: true, music: true, airDrop: true,
             sectionGit: true, sectionWork: true, sectionAgents: true,
             claudeDailyLimit: 250_000_000, claudeWeeklyLimit: 1_500_000_000,
@@ -73,6 +75,7 @@ struct NotchSettingsView: View {
     @AppStorage(Pref.replaceHUD) private var replaceHUD = false
     @AppStorage(Pref.widthAdjust) private var widthAdjust = 0.0
     @AppStorage(Pref.heightAdjust) private var heightAdjust = 0.0
+    @AppStorage(Pref.idleWidth) private var idleWidth = 48.0
     @AppStorage(Pref.tabHome) private var tabHome = true
     @AppStorage(Pref.tabShelf) private var tabShelf = true
     @AppStorage(Pref.tabTopbar) private var tabTopbar = true
@@ -137,6 +140,11 @@ struct NotchSettingsView: View {
                 Section("Notch Behavior & Sizing") {
                     Toggle("Open on hover", isOn: $openOnHover)
                     Text("When off, click or swipe down on the notch to open it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    LabeledContent("Idle extra width") {
+                        Slider(value: $idleWidth, in: 0...120, step: 4) { Text("\(Int(idleWidth)) pt") }
+                    }
+                    Text("Extra width beyond the camera notch when idle, keeping the notch visible when no agent or music is active.")
                         .font(.caption).foregroundStyle(.secondary)
                     LabeledContent("Width adjustment") {
                         Slider(value: $widthAdjust, in: -40...80, step: 2) { Text("\(Int(widthAdjust)) pt") }
