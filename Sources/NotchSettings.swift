@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 
 /// UserDefaults keys for the notch's settings.
 enum Pref {
@@ -63,6 +64,7 @@ struct NotchSettingsView: View {
     @Namespace private var tabPill
 
     @AppStorage(Pref.openOnHover) private var openOnHover = true
+    @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @AppStorage(Pref.liveAgents) private var liveAgents = true
     @AppStorage(Pref.liveMusic) private var liveMusic = true
     @AppStorage(Pref.liveBattery) private var liveBattery = true
@@ -179,6 +181,28 @@ struct NotchSettingsView: View {
                 }
                 .disabled(!tabTopbar)
             case .system:
+                Section("Startup") {
+                    Toggle("Launch at login", isOn: Binding(
+                        get: { launchAtLogin },
+                        set: { enable in
+                            do {
+                                if enable {
+                                    try SMAppService.mainApp.register()
+                                } else {
+                                    try SMAppService.mainApp.unregister()
+                                }
+                            } catch {
+                                print("Launch at login error: \(error)")
+                            }
+                            launchAtLogin = SMAppService.mainApp.status == .enabled
+                        }
+                    ))
+                    .onAppear {
+                        launchAtLogin = SMAppService.mainApp.status == .enabled
+                    }
+                    Text("Starts TopBar automatically when you log into your Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("System HUD") {
                     Toggle("Replace volume and brightness HUD", isOn: $replaceHUD)
                         .onChange(of: replaceHUD) { HUD.shared.setEnabled(replaceHUD) }
