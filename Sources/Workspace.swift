@@ -1,0 +1,237 @@
+import SwiftUI
+
+/// The notch's Git / Work / Agents tab: section pills on top, one fixed-height area below,
+/// so switching sections never makes the panel jump.
+struct WorkspaceView: View {
+    @EnvironmentObject private var store: PullRequestStore
+    @EnvironmentObject private var custom: CustomStore
+    @AppStorage(Pref.sectionGit) private var showGit = true
+    @AppStorage(Pref.sectionWork) private var showWork = true
+    @AppStorage(Pref.sectionAgents) private var showAgents = true
+    @State private var section: Tab = .builtin(.git)
+    @State private var adding = false
+    @State private var newName = ""
+    @Namespace private var pill
+
+    /// Built-in sections switched on in Settings.
+    private var builtins: [AppSection] {
+        AppSection.allCases.filter {
+            switch $0 {
+            case .git:    return showGit
+            case .work:   return showWork
+            case .agents: return showAgents
+            }
+        }
+    }
+
+    /// The selected section, or the first one still shown if it was just switched off.
+    private var current: Tab? {
+        let visible = builtins.map { Tab.builtin($0) } + custom.sections.map { Tab.custom($0.id) }
+        return visible.contains(section) ? section : visible.first
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            pills
+            content.frame(height: 300)
+        }
+        .onAppear { store.start() }
+    }
+
+    private var pills: some View {
+        HStack(spacing: 4) {
+            ForEach(builtins) { pillButton(.builtin($0), $0.rawValue, $0.icon) }
+            ForEach(custom.sections) { s in
+                pillButton(.custom(s.id), s.name, "star.fill")
+                    .contextMenu {
+                        Button("Delete Section", role: .destructive) {
+                            if section == .custom(s.id) { section = .builtin(.git) }
+                            custom.removeSection(s.id)
+                        }
+                    }
+            }
+            if adding {
+                // Inline, because the notch can't host modal sheets/alerts.
+                TextField("Section name", text: $newName)
+                    .textFieldStyle(.plain)
+                    .frame(width: 110)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(.white.opacity(0.1), in: Capsule())
+                    .onSubmit(commitSection)
+                    .onExitCommand { adding = false; newName = "" }
+            } else {
+                Button { adding = true } label: {
+                    Image(systemName: "plus").frame(width: 26, height: 26).background(.white.opacity(0.06), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Add a section")
+            }
+            Spacer()
+            if current == .builtin(.git) {
+                if store.isLoading {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button { Task { await store.refresh() } } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.plain)
+                        .help("Refresh pull requests")
+                }
+            }
+        }
+        .font(.callout)
+    }
+
+    private func pillButton(_ tab: Tab, _ label: String, _ icon: String) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { section = tab }
+        } label: {
+            Label(label, systemImage: icon)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background {
+                    if current == tab {
+                        Capsule().fill(.white.opacity(0.16)).matchedGeometryEffect(id: "pill", in: pill)
+                    }
+                }
+                .foregroundStyle(current == tab ? .primary : .secondary)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder private var content: some View {
+        switch current {
+        case .builtin(.git):
+            HStack(spacing: 10) {
+                PRColumn(list: .mine)
+                PRColumn(list: .review)
+            }
+        case .builtin(.work):
+            FolderGrid().notchCard()
+        case .builtin(.agents):
+            AgentsView().notchCard()
+        case .custom(let id):
+            CustomSectionView(sectionID: id).notchCard()
+        case nil:
+            Text("All sections are turned off in Settings — add one with +")
+                .foregroundStyle(.secondary)
+                .notchCard()
+        }
+    }
+
+    private func commitSection() {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        custom.addSection(named: name)
+        if let id = custom.sections.last?.id { section = .custom(id) }
+        newName = ""
+        adding = false
+    }
+}
+
+/// One PR list as a card: title + count, then the rows.
+private struct PRColumn: View {
+    @EnvironmentObject private var store: PullRequestStore
+    let list: PRList
+
+    private var prs: [PullRequest] { store.pullRequests(for: list) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Text(list.rawValue).font(.headline)
+                Text("\(prs.count)")
+                    .font(.caption.bold().monospacedDigit())
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 1)
+                    .background(.white.opacity(0.12), in: Capsule())
+            }
+            if store.isLoading && prs.isEmpty {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = store.errorMessage, prs.isEmpty {
+                Text(error).font(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if prs.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: list == .mine ? "checkmark.seal" : "tray").font(.title2)
+                    Text(list == .mine ? "No open PRs" : "Nothing to review")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(prs) { pr in
+                            PullRequestRow(
+                                pullRequest: pr,
+                                reviewed: list == .review ? store.reviewedURLs.contains(pr.url) : nil,
+                                mergeStatus: list == .mine ? store.mergeStatus[pr.url] : nil)
+                        }
+                    }
+                }
+            }
+        }
+        .notchCard()
+    }
+}
+
+/// ~/work folders as icon tiles.
+private struct FolderGrid: View {
+    private let folders = Work.folders()
+
+    var body: some View {
+        if folders.isEmpty {
+            Text("No folders in ~/work").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 6)], spacing: 6) {
+                    ForEach(folders, id: \.path) { url in
+                        Button { Work.open(url) } label: {
+                            VStack(spacing: 6) {
+                                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
+                                    .resizable()
+                                    .frame(width: 40, height: 40)
+                                Text(url.lastPathComponent).font(.caption).lineLimit(1).truncationMode(.middle)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 4)
+                            .contentShape(Rectangle())
+                            .hoverHighlight(radius: 10)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Click: Finder · ⇧ VS Code · ⇧⌘ iTerm")
+                    }
+                }
+            }
+        }
+    }
+}
+
+extension View {
+    /// A softly lit rounded panel, the building block of the open notch.
+    func notchCard() -> some View {
+        padding(10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.07)))
+    }
+
+    /// Soft highlight under the pointer, for clickable rows and tiles.
+    func hoverHighlight(radius: CGFloat = 8) -> some View {
+        modifier(HoverHighlight(radius: radius))
+    }
+}
+
+private struct HoverHighlight: ViewModifier {
+    let radius: CGFloat
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .background(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .fill(.primary.opacity(hovering ? 0.08 : 0)))
+            .onHover { hovering = $0 }
+            .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+}

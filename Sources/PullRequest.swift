@@ -19,12 +19,14 @@ struct PullRequest: Decodable, Identifiable {
 enum AppSection: String, CaseIterable, Identifiable {
     case git = "Git"
     case work = "Work"
+    case agents = "Agents"
 
     var id: String { rawValue }
     var icon: String {
         switch self {
-        case .git:  return "arrow.triangle.branch"
+        case .git:  return "arrow.triangle.pull"
         case .work: return "folder"
+        case .agents: return "sparkles"
         }
     }
 }

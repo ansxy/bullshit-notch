@@ -6,5 +6,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 cp Info.plist "$APP/Contents/Info.plist"
 swiftc -parse-as-library -O -o "$APP/Contents/MacOS/TopBar" Sources/*.swift
+# Ad-hoc sign the whole bundle so macOS privacy prompts (calendar, camera, automation) can read Info.plist.
+codesign --force --sign - "$APP"
 echo "Built $APP — launching."
 open "$APP"

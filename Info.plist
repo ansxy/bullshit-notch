@@ -8,7 +8,11 @@
     <key>CFBundleVersion</key>         <string>1</string>
     <key>CFBundleShortVersionString</key> <string>1.0</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
-    <key>LSMinimumSystemVersion</key>  <string>13.0</string>
+    <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <key>LSUIElement</key>             <true/>
+    <key>NSCalendarsFullAccessUsageDescription</key> <string>Shows today's events in the notch.</string>
+    <key>NSRemindersFullAccessUsageDescription</key> <string>Shows and completes today's reminders in the notch.</string>
+    <key>NSCameraUsageDescription</key>              <string>The notch mirror shows your camera preview.</string>
+    <key>NSAppleEventsUsageDescription</key>         <string>Reads and controls what's playing in Music and Spotify.</string>
 </dict>
 </plist>

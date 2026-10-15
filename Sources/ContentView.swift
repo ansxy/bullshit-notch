@@ -70,6 +70,8 @@ struct ContentView: View {
             content
         case .builtin(.work):
             WorkView()
+        case .builtin(.agents):
+            AgentsView()
         case .custom(let id):
             CustomSectionView(sectionID: id)
         }
@@ -179,7 +181,7 @@ private struct WorkView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(folders, id: \.path) { url in
-                        Button(action: { open(url) }) {
+                        Button(action: { Work.open(url) }) {
                             Label(url.lastPathComponent, systemImage: "folder")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.vertical, 6)
@@ -194,29 +196,9 @@ private struct WorkView: View {
             .frame(minHeight: 320, maxHeight: 500)
         }
     }
-
-    /// Plain click → Finder, Shift → VS Code, Shift+Cmd → iTerm.
-    private func open(_ url: URL) {
-        let flags = NSEvent.modifierFlags
-        if flags.contains(.shift) && flags.contains(.command) {
-            openWith("iTerm", url)
-        } else if flags.contains(.shift) {
-            openWith("Visual Studio Code", url)
-        } else if flags.contains(.shift) && flags.contains(.option) {
-        } else {
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    private func openWith(_ app: String, _ url: URL) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-a", app, url.path]
-        try? process.run()
-    }
 }
 
-private struct CustomSectionView: View {
+struct CustomSectionView: View {
     @EnvironmentObject private var custom: CustomStore
     let sectionID: UUID
     @State private var showAddItem = false
@@ -329,7 +311,7 @@ private struct CustomSectionView: View {
     }
 }
 
-private struct PullRequestRow: View {
+struct PullRequestRow: View {
     let pullRequest: PullRequest
     /// nil = don't show review state (e.g. the "Mine" tab).
     var reviewed: Bool? = nil
@@ -362,6 +344,7 @@ private struct PullRequestRow: View {
             .padding(.vertical, 6)
             .padding(.horizontal, 8)
             .contentShape(Rectangle())
+            .hoverHighlight()
         }
         .buttonStyle(.plain)
     }

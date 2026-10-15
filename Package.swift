@@ -5,7 +5,7 @@ import PackageDescription
 // The runnable app is still built via build.sh / the swiftc one-liner.
 let package = Package(
     name: "TopBar",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     targets: [
         .executableTarget(name: "TopBar", path: "Sources")
     ]
