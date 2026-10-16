@@ -56,6 +56,18 @@ final class NowPlaying: ObservableObject {
         run("tell application \"\(player.rawValue)\" to set player position to \(seconds)")
     }
 
+    /// Brings the active player (Spotify or Apple Music) to the front, or launches one if neither is running.
+    func openPlayer() {
+        let target = player
+            ?? Player.allCases.first(where: \.isRunning)
+            ?? (NSWorkspace.shared.urlForApplication(withBundleIdentifier: Player.spotify.bundleID) != nil ? .spotify : .music)
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: target.bundleID).first {
+            app.activate()
+        } else if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: target.bundleID) {
+            NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
     private func run(_ script: String) {
         DispatchQueue.global().async {
             _ = shell("/usr/bin/osascript", ["-e", script])

@@ -1,4 +1,5 @@
 import AppKit
+import EventKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -19,6 +20,7 @@ final class NotchController: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ note: Notification) {
         guard let screen = NSScreen.screens.first(where: { $0.safeAreaInsets.top > 0 }) ?? NSScreen.main else { return }
         model = NotchModel(notch: Self.notchSize(of: screen))
+        NotchModel.shared = model
         _ = (Battery.shared, NowPlaying.shared)  // start listening right away
         HUD.shared.setEnabled(UserDefaults.standard.bool(forKey: Pref.replaceHUD))
 
@@ -69,6 +71,21 @@ final class NotchController: NSObject, NSApplicationDelegate {
     /// Open when the pointer reaches the black shape (or a file is dragged onto it); close when it leaves.
     /// Mouse events reach the window only while the pointer is over the shape.
     private func track(_ type: NSEvent.EventType) {
+        if model.pinnedPreview {
+            if !model.expanded { model.setExpanded(true) }
+            if let settingsWindow = NotchSettingsWindow.window, settingsWindow.isVisible,
+               settingsWindow.frame.contains(NSEvent.mouseLocation) {
+                panel.ignoresMouseEvents = true
+                return
+            }
+            let frame = panel.frame, size = model.shapeSize
+            let shape = NSRect(x: frame.midX - size.width / 2, y: frame.maxY - size.height,
+                               width: size.width, height: size.height)
+            let inside = shape.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
+            panel.ignoresMouseEvents = !inside
+            return
+        }
+
         if let settingsWindow = NotchSettingsWindow.window, settingsWindow.isVisible,
            settingsWindow.frame.contains(NSEvent.mouseLocation) {
             if model.expanded { model.setExpanded(false) }
@@ -144,8 +161,12 @@ enum NotchTab: CaseIterable {
 
 @MainActor
 final class NotchModel: ObservableObject {
+    static var shared: NotchModel?
     let notch: CGSize
     @Published private(set) var expanded = false
+    @Published var pinnedPreview = false {
+        didSet { setExpanded(pinnedPreview) }
+    }
     @Published var tab = NotchTab.home
     /// Laid-out size of the black shape, for hit-testing the pointer (not published: layout writes it).
     var shapeSize: CGSize
@@ -178,8 +199,29 @@ private struct NotchView: View {
     @AppStorage(Pref.tabHome) private var tabHome = true
     @AppStorage(Pref.tabShelf) private var tabShelf = true
     @AppStorage(Pref.tabTopbar) private var tabTopbar = true
+
+    // Theme & Glass settings
+    @AppStorage(Pref.theme) private var theme = NotchTheme.glass.rawValue
+    @AppStorage(Pref.glassMaterial) private var glassMaterial = GlassMaterial.ultraThin.rawValue
+    @AppStorage(Pref.glassBlurOpacity) private var glassBlurOpacity = 0.90
+    @AppStorage(Pref.glassTintOpacity) private var glassTintOpacity = 0.32
+    @AppStorage(Pref.glassTopFade) private var glassTopFade = 0.75
+    @AppStorage(Pref.glassSheen) private var glassSheen = 0.12
+    @AppStorage(Pref.glassBorderOpacity) private var glassBorderOpacity = 0.28
+    @AppStorage(Pref.glassShadowOpacity) private var glassShadowOpacity = 0.40
+    @AppStorage(Pref.glassAccentGlow) private var glassAccentGlow = 0.18
+    @AppStorage(Pref.glassClosed) private var glassClosed = false
+
     @State private var dropTargeted = false
     @Namespace private var tabHighlight
+
+    private var isGlass: Bool {
+        theme == NotchTheme.glass.rawValue && (model.expanded || glassClosed)
+    }
+
+    private var currentMaterial: Material {
+        (GlassMaterial(rawValue: glassMaterial) ?? .ultraThin).swiftUIMaterial
+    }
 
     /// Tabs switched on in Settings (never empty: Settings keeps at least one on).
     private var visibleTabs: [NotchTab] {
@@ -223,6 +265,21 @@ private struct NotchView: View {
         return .none
     }
 
+    private var rimOpacity: Double {
+        if isGlass {
+            return model.expanded ? glassBorderOpacity : glassBorderOpacity * 0.6
+        }
+        return model.expanded ? 0.16 : 0.08
+    }
+
+    private var shadowStrength: Double {
+        theme == NotchTheme.glass.rawValue ? glassShadowOpacity : 0.35
+    }
+
+    private var glowStrength: Double {
+        theme == NotchTheme.glass.rawValue ? glassAccentGlow : 0.08
+    }
+
     var body: some View {
         Group {
             if model.expanded { expanded } else { collapsed }
@@ -230,15 +287,30 @@ private struct NotchView: View {
         .padding(.horizontal, shape.flare)
         .background { surface }
         .clipShape(shape)
+        // Shadow is cast by a backing shape outside clipShape so we don't need .compositingGroup(),
+        // keeping SwiftUI's Material backdrop blur live over windows behind the notch.
+        .background {
+            if model.expanded {
+                shape
+                    .fill(.black.opacity(0.01))
+                    .shadow(color: .black.opacity(shadowStrength), radius: 14, y: 6)
+                    .shadow(color: (accent ?? .clear).opacity(glowStrength * 0.7), radius: 12, y: 4)
+            }
+        }
         // Hairline rim that fades in from the top, so the flared corners still melt into the bezel.
         .overlay {
-            shape.stroke(LinearGradient(colors: [.clear, .white.opacity(model.expanded ? 0.16 : 0.08)], startPoint: .top, endPoint: .bottom),
-                         lineWidth: 1)
+            shape.stroke(
+                LinearGradient(
+                    colors: [
+                        .white.opacity(isGlass ? rimOpacity * (1 - glassTopFade) : 0),
+                        .white.opacity(rimOpacity)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: 1
+            )
         }
-        .compositingGroup()
-        // Open only; subtle shadow and soft ambient accent glow.
-        .shadow(color: .black.opacity(model.expanded ? 0.35 : 0), radius: 14, y: 6)
-        .shadow(color: (accent ?? .clear).opacity(model.expanded ? 0.08 : 0), radius: 12, y: 4)
         .background(GeometryReader { geo in
             Color.clear.task(id: geo.size) { model.shapeSize = geo.size }
         })
@@ -250,19 +322,48 @@ private struct NotchView: View {
         .onChange(of: dropTargeted) { if dropTargeted && tabShelf { model.tab = .shelf } }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .environment(\.colorScheme, .dark)
+        .environment(\.controlActiveState, .key)
         .animation(.spring(response: 0.38, dampingFraction: 0.78), value: wing)
         .animation(.spring(response: 0.38, dampingFraction: 0.78), value: activity)
     }
 
-    /// Pure black when closed (so it hides in the real notch); when open, a deep gradient
-    /// with a subtle hint of color when something is live.
+    /// Surface background: either the classic Dark notch or the tunable Glass material stack.
     private var surface: some View {
         ZStack {
-            Color.black
-            if model.expanded {
-                LinearGradient(colors: [.black, Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
-                if let accent {
-                    RadialGradient(colors: [accent.opacity(0.08), .clear], center: .bottom, startRadius: 0, endRadius: 280)
+            if isGlass {
+                Rectangle()
+                    .fill(currentMaterial)
+                    .opacity(glassBlurOpacity)
+                Color.black.opacity(glassTintOpacity)
+                if glassSheen > 0 {
+                    LinearGradient(
+                        colors: [.white.opacity(glassSheen), .clear, .white.opacity(glassSheen * 0.4)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                }
+                if glassTopFade > 0 {
+                    LinearGradient(
+                        colors: [.black.opacity(glassTopFade), .clear],
+                        startPoint: .top,
+                        endPoint: UnitPoint(x: 0.5, y: model.expanded ? 0.38 : 1.0)
+                    )
+                }
+                if model.expanded, let accent, glassAccentGlow > 0 {
+                    RadialGradient(
+                        colors: [accent.opacity(glassAccentGlow), .clear],
+                        center: .bottom,
+                        startRadius: 0,
+                        endRadius: 300
+                    )
+                }
+            } else {
+                Color.black
+                if model.expanded {
+                    LinearGradient(colors: [.black, Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
+                    if let accent {
+                        RadialGradient(colors: [accent.opacity(0.08), .clear], center: .bottom, startRadius: 0, endRadius: 280)
+                    }
                 }
             }
         }
@@ -399,31 +500,28 @@ private struct NotchView: View {
     }
 }
 
-// MARK: - Home: music, calendar, mirror
+// MARK: - Home: music, calendar
 
 private struct HomeView: View {
     @AppStorage(Pref.music) private var music = true
     @AppStorage(Pref.agenda) private var agenda = true
-    @AppStorage(Pref.mirror) private var mirror = true
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            if music { MusicCard().notchCard().frame(width: 280) }
+            if music { MusicCard().frame(width: 150) }  // square: matches the row height below
             if agenda {
                 AgendaCard().notchCard()
-            } else if music || mirror {
-                Spacer(minLength: 0)
-            } else {
+            } else if !music {
                 Text("Everything on Home is turned off in Settings")
                     .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            if mirror { MirrorTile() }
         }
         .frame(height: 150)
     }
 }
 
+/// Album cover fills the card; title, progress and controls sit on a dark fade at the bottom.
 private struct MusicCard: View {
     @ObservedObject private var music = NowPlaying.shared
 
@@ -435,23 +533,50 @@ private struct MusicCard: View {
                 Text("Play something in Music or Spotify").font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture { music.openPlayer() }
+            .help("Click to open Music or Spotify")
+            .notchCard()
         } else {
-            HStack(spacing: 12) {
-                ArtworkView(image: music.artwork, size: 108, radius: 12)
-                    .shadow(color: (music.tint.map { Color(nsColor: $0) } ?? .clear).opacity(0.2), radius: 8)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(music.title).font(.headline).lineLimit(1)
-                    Text(music.artist).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                    Spacer(minLength: 0)
-                    progress
-                    HStack(spacing: 24) {
-                        control("backward.fill", .previous)
-                        control(music.playing ? "pause.fill" : "play.fill", .playPause).font(.title2)
-                        control("forward.fill", .next)
+            let rect = RoundedRectangle(cornerRadius: 14, style: .continuous)
+            VStack(spacing: 4) {
+                // Empty top area: clicking the cover opens the player.
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { music.openPlayer() }
+                    .help("Click to open \(music.player?.rawValue ?? "player")")
+                VStack(spacing: 0) {
+                    Text(music.title).font(.callout.weight(.semibold)).lineLimit(1)
+                    Text(music.artist).font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
+                .onTapGesture { music.openPlayer() }
+                progress
+                HStack(spacing: 24) {
+                    control("backward.fill", .previous)
+                    control(music.playing ? "pause.fill" : "play.fill", .playPause).font(.title3)
+                    control("forward.fill", .next)
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .foregroundStyle(.white)
+            .background {
+                ZStack {
+                    if let art = music.artwork {
+                        Image(nsImage: art).resizable().aspectRatio(contentMode: .fill)
+                    } else {
+                        Color.white.opacity(0.08)
+                        Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
                     }
-                    .frame(maxWidth: .infinity)
+                    LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.55), .black.opacity(0.85)],
+                                   startPoint: .top, endPoint: .bottom)
                 }
             }
+            .clipShape(rect)
+            .overlay(rect.strokeBorder(.white.opacity(0.1)))
         }
     }
 
@@ -495,7 +620,16 @@ private struct AgendaCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            days
+            HStack {
+                days
+                Spacer(minLength: 0)
+                Button { Agenda.openCalendarApp() } label: {
+                    Image(systemName: "calendar").font(.callout)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Open Calendar")
+            }
             ScrollView {
                 VStack(alignment: .leading, spacing: 5) {
                     if !agenda.calendarAccess && !agenda.remindersAccess {
@@ -512,6 +646,10 @@ private struct AgendaCard: View {
                             Text(event.isAllDay ? "all-day" : event.startDate.formatted(date: .omitted, time: .shortened))
                                 .foregroundStyle(.secondary)
                         }
+                        .contentShape(Rectangle())
+                        .hoverHighlight(radius: 5)
+                        .onTapGesture { Agenda.open(event) }
+                        .help("Open in Calendar")
                     }
                     ForEach(agenda.reminders, id: \.self) { reminder in
                         HStack(spacing: 6) {
@@ -525,8 +663,42 @@ private struct AgendaCard: View {
                 .font(.caption)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            if let meeting = agenda.nextMeeting { nextMeetingRow(meeting) }
         }
         .onAppear { agenda.start() }
+    }
+
+    /// "Next: Standup · 15:00   [Join]" — Join opens the call link, the rest opens the event.
+    private func nextMeetingRow(_ event: EKEvent) -> some View {
+        let live = event.startDate <= .now
+        return HStack(spacing: 6) {
+            Image(systemName: "video.fill").font(.caption2).foregroundStyle(live ? .green : .secondary)
+            Text(event.title ?? "Meeting").lineLimit(1)
+            Text(live ? "now" : Self.when(event.startDate)).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 4)
+            if let link = agenda.nextMeetingLink {
+                Button("Join") { NSWorkspace.shared.open(link) }
+                    .buttonStyle(.plain)
+                    .font(.caption.bold())
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background((live ? Color.green : Color.accentColor).opacity(0.8), in: Capsule())
+                    .help(link.absoluteString)
+            }
+        }
+        .font(.caption)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture { Agenda.open(event) }
+    }
+
+    /// "15:00" today, otherwise "Fri 15:00".
+    private static func when(_ date: Date) -> String {
+        Calendar.current.isDateInToday(date)
+            ? date.formatted(date: .omitted, time: .shortened)
+            : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 
     /// Yesterday through the next three days; tap to switch.
@@ -546,32 +718,6 @@ private struct AgendaCard: View {
                 .buttonStyle(.plain)
             }
         }
-    }
-}
-
-/// Click to turn the camera on; it turns off when the notch closes.
-private struct MirrorTile: View {
-    @State private var on = false
-
-    var body: some View {
-        ZStack {
-            if on {
-                MirrorView()
-            } else {
-                VStack(spacing: 4) {
-                    Image(systemName: "web.camera").font(.title2)
-                    Text("Mirror").font(.caption)
-                }
-                .foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: 120)
-        .frame(maxHeight: .infinity)
-        .background(Color.white.opacity(0.045))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.07)))
-        .contentShape(Rectangle())
-        .onTapGesture { on.toggle() }
     }
 }
 
@@ -687,17 +833,24 @@ private struct ArtworkView: View {
 /// ponytail: decorative bars, not a real spectrum — apps can't tap system audio without a capture permission.
 private struct Visualizer: View {
     let playing: Bool
+    @State private var heights: [CGFloat] = [5, 10, 6, 9]
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.18)) { context in
-            HStack(spacing: 2) {
-                ForEach(0..<4, id: \.self) { _ in
-                    Capsule()
-                        .fill(.white)
-                        .frame(width: 3, height: playing ? .random(in: 3...14) : 3)
-                }
+        HStack(spacing: 2) {
+            ForEach(0..<4, id: \.self) { i in
+                Capsule()
+                    .fill(.white)
+                    .frame(width: 3, height: playing ? heights[i] : 3)
             }
-            .animation(.easeInOut(duration: 0.18), value: context.date)
+        }
+        .task(id: playing) {
+            guard playing else { return }
+            while !Task.isCancelled {
+                withAnimation(.easeInOut(duration: 0.45)) {
+                    heights = heights.map { $0 > 8 ? .random(in: 4...7) : .random(in: 9...13) }
+                }
+                try? await Task.sleep(for: .milliseconds(440))
+            }
         }
     }
 }

@@ -27,6 +27,20 @@ enum Pref {
     static let claudeWeeklyLimit = "claudeWeeklyLimit"
     static let agyDailyLimit = "agyDailyLimit"
     static let agyWeeklyLimit = "agyWeeklyLimit"
+    // Theme & Glass tuning.
+    static let theme = "notchTheme"
+    static let glassMaterial = "glassMaterial"
+    static let glassBlurOpacity = "glassBlurOpacity"
+    static let glassTintOpacity = "glassTintOpacity"
+    static let glassTopFade = "glassTopFade"
+    static let glassSheen = "glassSheen"
+    static let glassBorderOpacity = "glassBorderOpacity"
+    static let glassShadowOpacity = "glassShadowOpacity"
+    static let glassAccentGlow = "glassAccentGlow"
+    static let glassCardOpacity = "glassCardOpacity"
+    static let glassCardBorderOpacity = "glassCardBorderOpacity"
+    static let glassCardBlur = "glassCardBlur"
+    static let glassClosed = "glassClosed"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -37,12 +51,72 @@ enum Pref {
             sectionGit: true, sectionWork: true, sectionAgents: true,
             claudeDailyLimit: 250_000_000, claudeWeeklyLimit: 1_500_000_000,
             agyDailyLimit: 25_000_000, agyWeeklyLimit: 100_000_000,
+            theme: NotchTheme.glass.rawValue,
+            glassMaterial: GlassMaterial.ultraThin.rawValue,
+            glassBlurOpacity: 0.90,
+            glassTintOpacity: 0.32,
+            glassTopFade: 0.75,
+            glassSheen: 0.12,
+            glassBorderOpacity: 0.28,
+            glassShadowOpacity: 0.40,
+            glassAccentGlow: 0.18,
+            glassCardOpacity: 0.07,
+            glassCardBorderOpacity: 0.15,
+            glassCardBlur: false,
+            glassClosed: false,
         ])
+    }
+}
+
+enum NotchTheme: String, CaseIterable, Identifiable {
+    case dark = "dark"
+    case glass = "glass"
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .dark:  return "Dark"
+        case .glass: return "Glass"
+        }
+    }
+}
+
+enum GlassMaterial: String, CaseIterable, Identifiable {
+    case ultraThin = "ultraThin"
+    case thin = "thin"
+    case regular = "regular"
+    case thick = "thick"
+    case ultraThick = "ultraThick"
+    case bar = "bar"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .ultraThin:  return "Ultra Thin"
+        case .thin:       return "Thin"
+        case .regular:    return "Regular"
+        case .thick:      return "Thick"
+        case .ultraThick: return "Ultra Thick"
+        case .bar:        return "Bar"
+        }
+    }
+
+    var swiftUIMaterial: Material {
+        switch self {
+        case .ultraThin:  return .ultraThinMaterial
+        case .thin:       return .thinMaterial
+        case .regular:    return .regularMaterial
+        case .thick:      return .thickMaterial
+        case .ultraThick: return .ultraThickMaterial
+        case .bar:        return .bar
+        }
     }
 }
 
 enum SettingsTab: String, CaseIterable, Identifiable {
     case notch = "Notch"
+    case theme = "Theme"
     case activities = "Activities"
     case tabs = "Tabs"
     case menus = "Menus"
@@ -53,6 +127,7 @@ enum SettingsTab: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .notch:      return "display"
+        case .theme:      return "sparkles"
         case .activities: return "flame.fill"
         case .tabs:       return "rectangle.3.group.fill"
         case .menus:      return "checklist"
@@ -62,8 +137,9 @@ enum SettingsTab: String, CaseIterable, Identifiable {
 }
 
 struct NotchSettingsView: View {
-    @State private var selectedTab: SettingsTab = .notch
+    @State private var selectedTab: SettingsTab = .theme
     @Namespace private var tabPill
+    @State private var copiedValues = false
 
     @AppStorage(Pref.openOnHover) private var openOnHover = true
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -85,6 +161,22 @@ struct NotchSettingsView: View {
     @AppStorage(Pref.sectionWork) private var sectionWork = true
     @AppStorage(Pref.sectionAgents) private var sectionAgents = true
 
+    // Theme & Glass settings
+    @AppStorage(Pref.theme) private var theme = NotchTheme.glass.rawValue
+    @AppStorage(Pref.glassMaterial) private var glassMaterial = GlassMaterial.ultraThin.rawValue
+    @AppStorage(Pref.glassBlurOpacity) private var glassBlurOpacity = 0.90
+    @AppStorage(Pref.glassTintOpacity) private var glassTintOpacity = 0.32
+    @AppStorage(Pref.glassTopFade) private var glassTopFade = 0.75
+    @AppStorage(Pref.glassSheen) private var glassSheen = 0.12
+    @AppStorage(Pref.glassBorderOpacity) private var glassBorderOpacity = 0.28
+    @AppStorage(Pref.glassShadowOpacity) private var glassShadowOpacity = 0.40
+    @AppStorage(Pref.glassAccentGlow) private var glassAccentGlow = 0.18
+    @AppStorage(Pref.glassCardOpacity) private var glassCardOpacity = 0.07
+    @AppStorage(Pref.glassCardBorderOpacity) private var glassCardBorderOpacity = 0.15
+    @AppStorage(Pref.glassCardBlur) private var glassCardBlur = false
+    @AppStorage(Pref.glassClosed) private var glassClosed = false
+    @State private var pinNotchPreview = false
+
     /// The notch always keeps at least one tab, so the last one left on can't be turned off.
     private var tabsOn: Int { [tabHome, tabShelf, tabTopbar].filter { $0 }.count }
 
@@ -94,7 +186,10 @@ struct NotchSettingsView: View {
             Divider()
             formContent
         }
-        .frame(width: 480, height: 380)
+        .frame(width: 500, height: 460)
+        .onChange(of: pinNotchPreview) {
+            NotchModel.shared?.pinnedPreview = pinNotchPreview
+        }
     }
 
     private var tabBar: some View {
@@ -153,6 +248,62 @@ struct NotchSettingsView: View {
                         Slider(value: $heightAdjust, in: -10...20, step: 1) { Text("\(Int(heightAdjust)) pt") }
                     }
                 }
+            case .theme:
+                Section("Appearance") {
+                    Picker("Theme", selection: $theme) {
+                        ForEach(NotchTheme.allCases) { t in
+                            Text(t.title).tag(t.rawValue)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    Toggle("Keep notch open to preview live", isOn: $pinNotchPreview)
+                    Text("Keeps the notch expanded at the top of your screen while you adjust sliders below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                if theme == NotchTheme.glass.rawValue {
+                    Section("Glass Surface") {
+                        Picker("Blur material", selection: $glassMaterial) {
+                            ForEach(GlassMaterial.allCases) { m in
+                                Text(m.title).tag(m.rawValue)
+                            }
+                        }
+                        sliderRow("Blur opacity", value: $glassBlurOpacity, range: 0...1, step: 0.02)
+                        sliderRow("Dark tint", value: $glassTintOpacity, range: 0...0.95, step: 0.02)
+                        sliderRow("Top bezel fade", value: $glassTopFade, range: 0...1, step: 0.02)
+                        sliderRow("Glass sheen", value: $glassSheen, range: 0...0.5, step: 0.01)
+                        sliderRow("Rim border", value: $glassBorderOpacity, range: 0...0.8, step: 0.02)
+                        sliderRow("Drop shadow", value: $glassShadowOpacity, range: 0...0.8, step: 0.02)
+                        sliderRow("Accent glow", value: $glassAccentGlow, range: 0...0.6, step: 0.02)
+                        Toggle("Glass on closed notch wings", isOn: $glassClosed)
+                    }
+
+                    Section("Glass Inner Cards") {
+                        sliderRow("Card fill opacity", value: $glassCardOpacity, range: 0...0.35, step: 0.01)
+                        sliderRow("Card border opacity", value: $glassCardBorderOpacity, range: 0...0.5, step: 0.01)
+                        Toggle("Extra blur inside cards", isOn: $glassCardBlur)
+                    }
+
+                    Section("Current Values") {
+                        Text(glassSummary)
+                            .font(.system(.caption, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        HStack {
+                            Button(copiedValues ? "Copied!" : "Copy Values") {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(glassSummary, forType: .string)
+                                copiedValues = true
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copiedValues = false }
+                            }
+                            Spacer()
+                            Button("Reset Glass Defaults") {
+                                resetGlassDefaults()
+                            }
+                        }
+                    }
+                }
             case .activities:
                 Section("Live Activities Beside Notch") {
                     Toggle("Agents working — Claude / Antigravity (fire)", isOn: $liveAgents)
@@ -173,7 +324,6 @@ struct NotchSettingsView: View {
                 Section("Home Tab Items") {
                     Toggle("Music player", isOn: $music)
                     Toggle("Calendar and reminders", isOn: $agenda)
-                    Toggle("Mirror (camera)", isOn: $mirror)
                 }
                 .disabled(!tabHome)
 
@@ -224,6 +374,43 @@ struct NotchSettingsView: View {
         }
         .formStyle(.grouped)
     }
+
+    private func sliderRow(_ label: String, value: Binding<Double>, range: ClosedRange<Double>, step: Double) -> some View {
+        LabeledContent(label) {
+            HStack(spacing: 8) {
+                Slider(value: value, in: range, step: step)
+                Text(String(format: "%.2f", value.wrappedValue))
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 36, alignment: .trailing)
+            }
+        }
+    }
+
+    private var glassSummary: String {
+        String(
+            format: "material=%@ blur=%.2f tint=%.2f topFade=%.2f sheen=%.2f border=%.2f shadow=%.2f glow=%.2f card=%.2f cardBorder=%.2f cardBlur=%@ closed=%@",
+            glassMaterial, glassBlurOpacity, glassTintOpacity, glassTopFade, glassSheen,
+            glassBorderOpacity, glassShadowOpacity, glassAccentGlow,
+            glassCardOpacity, glassCardBorderOpacity,
+            glassCardBlur ? "true" : "false", glassClosed ? "true" : "false"
+        )
+    }
+
+    private func resetGlassDefaults() {
+        glassMaterial = GlassMaterial.ultraThin.rawValue
+        glassBlurOpacity = 0.90
+        glassTintOpacity = 0.32
+        glassTopFade = 0.75
+        glassSheen = 0.12
+        glassBorderOpacity = 0.28
+        glassShadowOpacity = 0.40
+        glassAccentGlow = 0.18
+        glassCardOpacity = 0.07
+        glassCardBorderOpacity = 0.15
+        glassCardBlur = false
+        glassClosed = false
+    }
 }
 
 /// A plain window for settings: SwiftUI's Settings scene won't come forward in a menu-bar-only app.
@@ -237,7 +424,18 @@ enum NotchSettingsWindow {
             w.title = "TopBar Settings"
             w.styleMask = [.titled, .closable]
             w.isReleasedWhenClosed = false
-            w.center()
+            if let screen = NSScreen.main {
+                let frame = screen.visibleFrame
+                let size = w.frame.size
+                // Position below the expanded notch so live preview is unobstructed.
+                w.setFrameOrigin(NSPoint(x: frame.midX - size.width / 2,
+                                         y: max(frame.minY + 40, frame.midY - size.height / 2 - 80)))
+            } else {
+                w.center()
+            }
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+                MainActor.assumeIsolated { NotchModel.shared?.pinnedPreview = false }
+            }
             window = w
         }
         NSApp.activate(ignoringOtherApps: true)

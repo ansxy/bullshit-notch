@@ -213,13 +213,44 @@ extension View {
     func notchCard() -> some View {
         padding(10)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.07)))
+            .notchCardBackground(radius: 14)
+    }
+
+    /// Applies the themed card fill, optional inner blur, and border stroke.
+    func notchCardBackground(radius: CGFloat = 14) -> some View {
+        modifier(NotchCardBackground(radius: radius))
     }
 
     /// Soft highlight under the pointer, for clickable rows and tiles.
     func hoverHighlight(radius: CGFloat = 8) -> some View {
         modifier(HoverHighlight(radius: radius))
+    }
+}
+
+private struct NotchCardBackground: ViewModifier {
+    let radius: CGFloat
+    @AppStorage(Pref.theme) private var theme = NotchTheme.glass.rawValue
+    @AppStorage(Pref.glassCardOpacity) private var glassCardOpacity = 0.07
+    @AppStorage(Pref.glassCardBorderOpacity) private var glassCardBorderOpacity = 0.15
+    @AppStorage(Pref.glassCardBlur) private var glassCardBlur = false
+
+    private var isGlass: Bool { theme == NotchTheme.glass.rawValue }
+    private var fillOpacity: Double { isGlass ? glassCardOpacity : 0.045 }
+    private var borderOpacity: Double { isGlass ? glassCardBorderOpacity : 0.07 }
+
+    func body(content: Content) -> some View {
+        let rect = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        content
+            .background {
+                ZStack {
+                    if isGlass && glassCardBlur {
+                        rect.fill(.ultraThinMaterial)
+                    }
+                    rect.fill(.white.opacity(fillOpacity))
+                }
+            }
+            .clipShape(rect)
+            .overlay(rect.strokeBorder(.white.opacity(borderOpacity)))
     }
 }
 
