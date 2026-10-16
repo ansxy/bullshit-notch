@@ -53,15 +53,7 @@ else
     SOURCE_DIR="$TEMP_DIR"
 fi
 
-# 2. Check for swiftc compiler
-if ! command -v swiftc &>/dev/null; then
-    echo -e "${RED}Error: 'swiftc' compiler not found.${RESET}"
-    echo -e "Please install the Xcode Command Line Tools by running:"
-    echo -e "    ${BOLD}xcode-select --install${RESET}"
-    exit 1
-fi
-
-# 3. Determine installation destination
+# 2. Determine installation destination
 TARGET_APP="/Applications/TopBar.app"
 USER_APP="$HOME/Applications/TopBar.app"
 
@@ -75,28 +67,79 @@ else
     DEST_APP="$USER_APP"
 fi
 
-echo -e "${CYAN}==>${RESET} Building TopBar from source (${BOLD}release mode${RESET})..."
 BUILD_APP="$SOURCE_DIR/TopBar.app"
 rm -rf "$BUILD_APP"
-mkdir -p "$BUILD_APP/Contents/MacOS"
-mkdir -p "$BUILD_APP/Contents/Resources"
 
-cp "$SOURCE_DIR/Info.plist" "$BUILD_APP/Contents/Info.plist"
+build_from_source() {
+    if ! /usr/bin/xcrun --sdk macosx --find swiftc &>/dev/null; then
+        return 1
+    fi
+    echo -e "${CYAN}==>${RESET} Building TopBar from source (${BOLD}release mode${RESET})..."
+    mkdir -p "$BUILD_APP/Contents/MacOS"
+    mkdir -p "$BUILD_APP/Contents/Resources"
+    cp "$SOURCE_DIR/Info.plist" "$BUILD_APP/Contents/Info.plist"
 
-# Generate or copy AppIcon
-if [[ ! -f "$SOURCE_DIR/Resources/AppIcon.icns" ]]; then
-    if [[ -f "$SOURCE_DIR/scripts/generate_icon.swift" ]]; then
+    if [[ ! -f "$SOURCE_DIR/Resources/AppIcon.icns" && -f "$SOURCE_DIR/scripts/generate_icon.swift" ]]; then
         echo -e "${CYAN}==>${RESET} Generating application icon..."
-        (cd "$SOURCE_DIR" && swift scripts/generate_icon.swift && iconutil -c icns AppIcon.iconset -o Resources/AppIcon.icns && rm -rf AppIcon.iconset) || true
+        (cd "$SOURCE_DIR" && /usr/bin/xcrun --sdk macosx swift scripts/generate_icon.swift && iconutil -c icns AppIcon.iconset -o Resources/AppIcon.icns && rm -rf AppIcon.iconset) || true
+    fi
+
+    if [[ -f "$SOURCE_DIR/Resources/AppIcon.icns" ]]; then
+        cp "$SOURCE_DIR/Resources/AppIcon.icns" "$BUILD_APP/Contents/Resources/AppIcon.icns"
+    fi
+
+    local arch
+    arch="$(uname -m)"
+    local sdk_path
+    sdk_path="$(/usr/bin/xcrun --sdk macosx --show-sdk-path 2>/dev/null || true)"
+    local dev_dir
+    dev_dir="$(xcode-select -p 2>/dev/null || true)"
+
+    local plugin_flags=()
+    for p in \
+        "$dev_dir/usr/lib/swift/host/plugins" \
+        "$dev_dir/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins" \
+        "$dev_dir/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins" \
+        "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins" \
+        "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins" \
+        "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins"; do
+        if [[ -d "$p" ]]; then
+            plugin_flags+=("-plugin-path" "$p")
+        fi
+    done
+
+    /usr/bin/xcrun --sdk macosx swiftc \
+        -target "${arch}-apple-macos14.0" \
+        ${sdk_path:+-sdk "$sdk_path"} \
+        "${plugin_flags[@]}" \
+        -parse-as-library -O \
+        -o "$BUILD_APP/Contents/MacOS/TopBar" \
+        "$SOURCE_DIR"/Sources/*.swift
+}
+
+download_prebuilt() {
+    echo -e "${CYAN}==>${RESET} Downloading pre-built TopBar.app from GitHub Releases..."
+    local zip_tmp
+    zip_tmp="$(mktemp -d)/TopBar.zip"
+    if curl -fsSL "https://github.com/ansxy/top-bar/releases/latest/download/TopBar.zip" -o "$zip_tmp"; then
+        rm -rf "$BUILD_APP"
+        ditto -x -k "$zip_tmp" "$SOURCE_DIR"
+        rm -f "$zip_tmp"
+        [[ -d "$BUILD_APP" ]]
+        return $?
+    fi
+    return 1
+}
+
+if ! build_from_source; then
+    echo -e "${YELLOW}==>${RESET} Local Swift build failed or compiler unavailable; falling back to pre-built release..."
+    if ! download_prebuilt; then
+        echo -e "${RED}Error: Could not build from source or download pre-built release.${RESET}"
+        echo -e "If you have Homebrew Swift installed, ensure Xcode Command Line Tools are selected:"
+        echo -e "    ${BOLD}sudo xcode-select --switch /Library/Developer/CommandLineTools${RESET}"
+        exit 1
     fi
 fi
-
-if [[ -f "$SOURCE_DIR/Resources/AppIcon.icns" ]]; then
-    cp "$SOURCE_DIR/Resources/AppIcon.icns" "$BUILD_APP/Contents/Resources/AppIcon.icns"
-fi
-
-# Compile Swift sources
-swiftc -parse-as-library -O -o "$BUILD_APP/Contents/MacOS/TopBar" "$SOURCE_DIR"/Sources/*.swift
 
 # Codesign ad-hoc
 echo -e "${CYAN}==>${RESET} Signing application bundle..."

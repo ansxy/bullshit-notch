@@ -9,7 +9,8 @@ cp Info.plist "$APP/Contents/Info.plist"
 if [ -f Resources/AppIcon.icns ]; then
     cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
-swiftc -parse-as-library -O -o "$APP/Contents/MacOS/TopBar" Sources/*.swift
+ARCH=$(uname -m)
+/usr/bin/xcrun --sdk macosx swiftc -target "${ARCH}-apple-macos14.0" -parse-as-library -O -o "$APP/Contents/MacOS/TopBar" Sources/*.swift
 # Ad-hoc sign the whole bundle so macOS privacy prompts (calendar, camera, automation) can read Info.plist.
 codesign --force --sign - "$APP"
 echo "Built $APP — launching."

@@ -620,16 +620,7 @@ private struct AgendaCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                days
-                Spacer(minLength: 0)
-                Button { Agenda.openCalendarApp() } label: {
-                    Image(systemName: "calendar").font(.callout)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Open Calendar")
-            }
+            days
             ScrollView {
                 VStack(alignment: .leading, spacing: 5) {
                     if !agenda.calendarAccess && !agenda.remindersAccess {
@@ -663,6 +654,10 @@ private struct AgendaCard: View {
                 .font(.caption)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { Agenda.openCalendarApp() }
+            .help("Click to open Calendar")
+
             if let meeting = agenda.nextMeeting { nextMeetingRow(meeting) }
         }
         .onAppear { agenda.start() }
@@ -701,23 +696,27 @@ private struct AgendaCard: View {
             : date.formatted(.dateTime.weekday(.abbreviated).hour().minute())
     }
 
-    /// Yesterday through the next three days; tap to switch.
+    /// Full week (-1...5) stretched across the entire width of the card; tap to switch day.
     private var days: some View {
         HStack(spacing: 4) {
-            ForEach(-1...3, id: \.self) { offset in
+            ForEach(-1...5, id: \.self) { offset in
                 let day = Calendar.current.date(byAdding: .day, value: offset, to: today) ?? today
                 let selected = day == agenda.day
                 Button { agenda.day = day } label: {
                     VStack(spacing: 1) {
-                        Text(day.formatted(.dateTime.weekday(.narrow))).font(.caption2).foregroundStyle(.secondary)
+                        Text(day.formatted(.dateTime.weekday(.abbreviated))).font(.caption2).foregroundStyle(.secondary)
                         Text(day.formatted(.dateTime.day())).font(.caption.bold())
                     }
-                    .frame(width: 28, height: 30)
-                    .background(selected ? Color.accentColor.opacity(0.8) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 30)
+                    .background(selected ? Color.accentColor.opacity(0.8) : .white.opacity(0.04),
+                                in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
         }
+        .frame(maxWidth: .infinity)
     }
 }
 

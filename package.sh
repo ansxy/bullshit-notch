@@ -24,8 +24,15 @@ if [ -f "Resources/AppIcon.icns" ]; then
     cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-echo "==> Compiling Swift sources..."
-swiftc -parse-as-library -O -o "$APP/Contents/MacOS/TopBar" Sources/*.swift
+echo "==> Compiling Swift sources (universal arm64 + x86_64, macOS 14.0+)..."
+if /usr/bin/xcrun --sdk macosx swiftc -target arm64-apple-macos14.0 -parse-as-library -O -o "$APP/Contents/MacOS/TopBar-arm64" Sources/*.swift && \
+   /usr/bin/xcrun --sdk macosx swiftc -target x86_64-apple-macos14.0 -parse-as-library -O -o "$APP/Contents/MacOS/TopBar-x86_64" Sources/*.swift; then
+    lipo -create -output "$APP/Contents/MacOS/TopBar" "$APP/Contents/MacOS/TopBar-arm64" "$APP/Contents/MacOS/TopBar-x86_64"
+    rm -f "$APP/Contents/MacOS/TopBar-arm64" "$APP/Contents/MacOS/TopBar-x86_64"
+else
+    ARCH=$(uname -m)
+    /usr/bin/xcrun --sdk macosx swiftc -target "${ARCH}-apple-macos14.0" -parse-as-library -O -o "$APP/Contents/MacOS/TopBar" Sources/*.swift
+fi
 
 echo "==> Signing application bundle..."
 codesign --force --deep --sign - "$APP"
