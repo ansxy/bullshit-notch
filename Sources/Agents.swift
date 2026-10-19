@@ -132,8 +132,13 @@ final class AgentStore: ObservableObject {
         Timer.scheduledTimer(withTimeInterval: 0.07, repeats: true) { _ in
             Task { @MainActor in
                 let store = AgentStore.shared
-                // Busy: burn. Idle: reset, so the next fire ignites from scratch in a new random colour.
-                if store.busyCount > 0 { store.fire.step() } else if store.fire.steps > 0 { store.fire = Fire() }
+                let alwaysOn = UserDefaults.standard.bool(forKey: Pref.agentAnimationAlwaysOn)
+                // Busy (or preview enabled): animate. Idle: reset, so the next run ignites from scratch.
+                if store.busyCount > 0 || alwaysOn {
+                    store.fire.step()
+                } else if store.fire.steps > 0 {
+                    store.fire = Fire()
+                }
             }
         }
     }
@@ -220,7 +225,7 @@ final class AgentStore: ObservableObject {
         let key = obj["requestId"] as? String ?? message["id"] as? String ?? UUID().uuidString
         let int = { (k: String) in u[k] as? Int ?? 0 }
         entry.usage[key] = (
-            int("input_tokens") + int("cache_creation_input_tokens") + int("cache_read_input_tokens"),
+            int("input_tokens") + int("cache_creation_input_tokens") + int("cache_read_input_tokens") / 10,
             int("output_tokens"))
     }
 }
@@ -451,18 +456,28 @@ private func tokenLabel(_ t: (input: Int, output: Int)) -> String {
     return "↑\(compact(t.input)) ↓\(compact(t.output))"
 }
 
-/// Doom-style fire: the bottom row is max heat; every step each cell's heat rises one row,
-/// cooling by a random amount and blowing sideways, so flames flicker.
+/// Procedural pixel animations for the closed notch: Doom fire, Knight Rider laser scanner,
+/// Tesla lightning arcs, liquid plasma wave, Matrix digital rain, rainbow rave, and warp starfield.
 struct Fire {
-    /// The bottom row is the always-hot source and isn't drawn.
-    static let cols = 28, rows = 12, maxHeat = 12
+    /// The bottom row is the always-hot source for Doom fire and isn't drawn.
+    static let cols = 140, rows = 15, maxHeat = 14
+    /// Drawn rows (`0..<drawRows`, where `0` is top and `drawRows - 1` is bottom).
+    static let drawRows = rows - 1
     /// New random colour every ~10s of burning (steps tick every 0.07s).
     private static let recolorSteps = 143
     /// Row-major, row 0 = top.
     private(set) var heat = [Int](repeating: 0, count: cols * rows)
+    private(set) var scannerTrail = [Double](repeating: 0, count: cols)
+    private(set) var scannerHead: Double = Double(cols) / 2
+    private(set) var lightningMain = [Int](repeating: 9, count: cols)
+    private(set) var lightningFork = [Int](repeating: 10, count: cols)
     private(set) var steps = 0
     /// Heat 0 = no fire (transparent); 1...7 = palette.
     private var palette = Fire.randomPalette()
+
+    private static let cycleStyles: [AgentAnimationStyle] = [
+        .fire, .scanner, .lightning, .plasma, .matrix, .rave, .warp
+    ]
 
     /// Fire-like ramp around a random hue: dark and saturated when cool, shifting hue and fading
     /// to near white when hot, the way Doom's runs red → yellow → white.
@@ -476,43 +491,254 @@ struct Fire {
         }
     }
 
-    /// The flame's mid colour, for tinting the notch glow.
-    var accent: NSColor { palette[4] }
+    func resolvedStyle(_ style: AgentAnimationStyle) -> AgentAnimationStyle {
+        guard style == .randomBullshit else { return style }
+        return Self.cycleStyles[(steps / 115) % Self.cycleStyles.count]
+    }
 
-    func color(row: Int, col: Int) -> NSColor? {
-        let h = heat[row * Self.cols + col]
-        return h == 0 ? nil : palette[(h - 1) * palette.count / Self.maxHeat]
+    /// The animation's mid colour, for tinting the notch glow.
+    var accent: NSColor {
+        let raw = UserDefaults.standard.string(forKey: Pref.agentAnimation) ?? AgentAnimationStyle.fire.rawValue
+        let style = AgentAnimationStyle(rawValue: raw) ?? .fire
+        return accent(for: style)
+    }
+
+    func accent(for style: AgentAnimationStyle) -> NSColor {
+        switch resolvedStyle(style) {
+        case .fire:
+            return palette[4]
+        case .scanner:
+            let hue = CGFloat((Double(steps) * 0.004).truncatingRemainder(dividingBy: 1.0))
+            return NSColor(hue: hue, saturation: 0.85, brightness: 1.0, alpha: 1)
+        case .lightning:
+            return NSColor(hue: 0.56, saturation: 0.80, brightness: 1.0, alpha: 1)
+        case .plasma:
+            let hue = CGFloat((0.75 + sin(Double(steps) * 0.05) * 0.22).truncatingRemainder(dividingBy: 1.0))
+            return NSColor(hue: (hue + 1).truncatingRemainder(dividingBy: 1.0), saturation: 0.85, brightness: 0.98, alpha: 1)
+        case .matrix:
+            return NSColor(hue: 0.37, saturation: 0.90, brightness: 0.95, alpha: 1)
+        case .rave:
+            let hue = CGFloat((Double(steps) * 0.025).truncatingRemainder(dividingBy: 1.0))
+            return NSColor(hue: hue, saturation: 0.90, brightness: 1.0, alpha: 1)
+        case .warp:
+            return NSColor(hue: 0.60, saturation: 0.75, brightness: 1.0, alpha: 1)
+        case .randomBullshit:
+            return palette[4]
+        }
+    }
+
+    func color(row: Int, col: Int, style: AgentAnimationStyle) -> NSColor? {
+        let dRows = Self.drawRows
+        let edgeDist = min(col, Self.cols - 1 - col)
+        let cornerMask = edgeDist < 4 ? Double(edgeDist + 1) / 5.0 : 1.0
+
+        switch resolvedStyle(style) {
+        case .fire:
+            let h = heat[row * Self.cols + col]
+            return h == 0 ? nil : palette[min(palette.count - 1, (h - 1) * palette.count / Self.maxHeat)]
+
+        case .scanner:
+            let trail = scannerTrail[col] * cornerMask
+            guard trail > 0.04 else { return nil }
+            let vNorm = Double(row + 1) / Double(dRows) // 0 at top -> 1 at bottom
+            let verticalProfile = pow(vNorm, 1.35)
+            let headDist = abs(Double(col) - scannerHead)
+            let isCore = headDist < 3.2 && row >= dRows - 5
+            let intensity = min(1.0, trail * (0.35 + 0.75 * verticalProfile) + (headDist < 4.5 ? (1.0 - headDist / 4.5) * 0.5 : 0))
+            guard intensity > 0.08 else { return nil }
+            let baseHue = (Double(steps) * 0.004 + (1.0 - trail) * 0.08).truncatingRemainder(dividingBy: 1.0)
+            let sat = isCore ? 0.18 : max(0.25, 1.0 - intensity * 0.45)
+            let bri = min(1.0, 0.25 + intensity * 0.85)
+            return NSColor(hue: CGFloat(baseHue), saturation: CGFloat(sat), brightness: CGFloat(bri), alpha: CGFloat(min(1.0, intensity * 1.15)))
+
+        case .lightning:
+            guard cornerMask > 0.2 else { return nil }
+            let mainY = lightningMain[col]
+            let forkY = lightningFork[col]
+            let dMain = abs(row - mainY)
+            let dFork = abs(row - forkY)
+            let surge = (steps % 14 == 0 || steps % 14 == 1) ? 1.25 : 1.0
+            if dMain == 0 {
+                return NSColor(hue: 0.54, saturation: 0.18, brightness: 1.0, alpha: 1.0)
+            } else if dMain == 1 {
+                return NSColor(hue: 0.57, saturation: 0.82, brightness: min(1.0, 0.92 * CGFloat(surge)), alpha: 0.92)
+            } else if dFork == 0 && col % 2 == 0 {
+                return NSColor(hue: 0.77, saturation: 0.75, brightness: 0.95, alpha: 0.85)
+            } else if dMain == 2 || (dFork == 1 && col % 3 == 0) {
+                return NSColor(hue: 0.62, saturation: 0.92, brightness: 0.65, alpha: 0.55)
+            }
+            // Occasional random high-voltage sparks
+            let sparkHash = (col * 37 + row * 101 + steps * 29) % 197
+            if sparkHash == 0 && row >= 3 {
+                return NSColor(hue: 0.55, saturation: 0.3, brightness: 1.0, alpha: 0.9)
+            }
+            return nil
+
+        case .plasma:
+            let t = Double(steps) * 0.13
+            let nx = Double(col) / Double(Self.cols) * 6.5
+            let ny = Double(row) / Double(dRows) * 3.2
+            let w1 = sin(nx + t)
+            let w2 = sin(ny * 1.6 - t * 0.85 + sin(nx * 0.75 + t * 0.55))
+            let w3 = sin((nx + ny) * 0.85 + t * 1.15)
+            let v = (w1 + w2 + w3) / 3.0 // -1...1
+            let norm = v * 0.5 + 0.5
+            let vEnv = pow(Double(row + 1) / Double(dRows), 0.45) * cornerMask
+            guard vEnv > 0.1 else { return nil }
+            let hue = (0.52 + norm * 0.42 + Double(steps) * 0.003).truncatingRemainder(dividingBy: 1.0)
+            let sat = 0.75 + 0.22 * sin(norm * .pi)
+            let bri = (0.38 + 0.62 * norm) * vEnv
+            return NSColor(hue: CGFloat(hue), saturation: CGFloat(sat), brightness: CGFloat(bri), alpha: CGFloat(min(1.0, vEnv * 1.1)))
+
+        case .matrix:
+            // Glitch slice flash every few frames
+            let glitchActive = (steps % 9 < 2)
+            let glitchColStart = (steps * 43) % (Self.cols - 24)
+            let glitchRow = (steps * 7) % max(1, dRows - 3) + 2
+            if glitchActive && ( row == glitchRow || row == glitchRow + 1 ) && col >= glitchColStart && col < glitchColStart + 24 {
+                let isCyan = (steps + col) % 2 == 0
+                return NSColor(hue: isCyan ? 0.52 : 0.86, saturation: 0.85, brightness: 1.0, alpha: 0.95)
+            }
+
+            let speed = 0.48 + Double((col * 73 + 19) % 9) * 0.075
+            let phase = Double((col * 131 + 11) % 89)
+            let cycle = Double(dRows + 7)
+            let head = (Double(steps) * speed + phase).truncatingRemainder(dividingBy: cycle) - 1.0
+            let dist = head - Double(row)
+            guard dist >= 0 && dist < 7.5 else { return nil }
+            if dist < 1.15 {
+                return NSColor(hue: 0.36, saturation: 0.22, brightness: 1.0, alpha: CGFloat(cornerMask))
+            }
+            // Flickering digital glyph trail
+            if (row + col + steps / 2) % 5 == 0 { return nil }
+            let fade = max(0, 1.0 - dist / 7.5) * cornerMask
+            let hue = 0.36 + (col % 4 == 0 ? 0.08 : 0.0)
+            return NSColor(hue: CGFloat(hue), saturation: 0.92, brightness: CGFloat(0.28 + 0.68 * fade), alpha: CGFloat(fade))
+
+        case .rave:
+            let t = Double(steps) * 0.18
+            let wave1 = sin(Double(col) * 0.16 - t * 1.8)
+            let wave2 = cos(Double(col) * 0.09 + t * 1.3)
+            let wave3 = sin(Double(col) * 0.31 + t * 2.4)
+            let heightFrac = 0.38 + 0.56 * ((wave1 * 0.45 + wave2 * 0.35 + wave3 * 0.20) * 0.5 + 0.5)
+            let topRow = Int(Double(dRows) * (1.0 - heightFrac))
+            guard row >= topRow else {
+                // Confetti strobe sparkles above the wave
+                let sparkle = (col * 53 + row * 97 + steps * 41) % 173
+                if sparkle == 0 {
+                    let sHue = CGFloat((Double(col) / Double(Self.cols) + t * 0.1).truncatingRemainder(dividingBy: 1.0))
+                    return NSColor(hue: sHue, saturation: 0.35, brightness: 1.0, alpha: 0.95)
+                }
+                return nil
+            }
+            let hue = ((Double(col) / Double(Self.cols)) * 1.35 - Double(steps) * 0.032 + Double(row) * 0.02 + 10.0)
+                .truncatingRemainder(dividingBy: 1.0)
+            let isTip = (row == topRow)
+            let vBri = 0.55 + 0.45 * (Double(row - topRow + 1) / Double(max(1, dRows - topRow)))
+            return NSColor(
+                hue: CGFloat(hue),
+                saturation: isTip ? 0.30 : 0.92,
+                brightness: isTip ? 1.0 : CGFloat(vBri),
+                alpha: CGFloat(cornerMask)
+            )
+
+        case .warp:
+            let center = Double(Self.cols) / 2.0
+            let distFromCenter = abs(Double(col) - center)
+            // Subtle central reactor core glow
+            if distFromCenter < 3.5 && row >= dRows / 3 {
+                let core = (1.0 - distFromCenter / 3.5) * 0.75
+                return NSColor(hue: 0.58, saturation: 0.45, brightness: 1.0, alpha: CGFloat(core))
+            }
+            // Deterministic accelerating star streaks per row & lane
+            let dir = col < Self.cols / 2 ? -1 : 1
+            for lane in 0..<3 {
+                let seed = (row * 31 + lane * 67 + (dir > 0 ? 13 : 29))
+                let period = 22.0 + Double(seed % 11)
+                let age = (Double(steps) + Double(seed % 29) * 1.7).truncatingRemainder(dividingBy: period) / period
+                let starDist = pow(age, 2.0) * (center - 1.0)
+                let tailLen = max(1.5, age * 14.0)
+                if distFromCenter <= starDist && distFromCenter >= starDist - tailLen {
+                    let posInStreak = 1.0 - (starDist - distFromCenter) / tailLen // 1 at head, 0 at tail
+                    let hue = (0.54 + Double(seed % 7) * 0.045 - (1.0 - posInStreak) * 0.08).truncatingRemainder(dividingBy: 1.0)
+                    let isHead = posInStreak > 0.82
+                    return NSColor(
+                        hue: CGFloat((hue + 1.0).truncatingRemainder(dividingBy: 1.0)),
+                        saturation: isHead ? 0.20 : 0.82,
+                        brightness: CGFloat(0.35 + 0.65 * posInStreak),
+                        alpha: CGFloat(posInStreak * cornerMask)
+                    )
+                }
+            }
+            return nil
+
+        case .randomBullshit:
+            return nil
+        }
     }
 
     mutating func step() {
         steps += 1
         if steps % Self.recolorSteps == 0 { palette = Self.randomPalette() }
         let cols = Self.cols, rows = Self.rows
-        for c in 0..<cols { heat[(rows - 1) * cols + c] = Self.maxHeat }
+        // 1. Step Doom fire buffer
+        for c in 0..<cols {
+            let edgeDist = min(c, cols - 1 - c)
+            let taper = edgeDist < 5 ? (5 - edgeDist) : 0
+            heat[(rows - 1) * cols + c] = max(0, Self.maxHeat - taper)
+        }
         for r in 0..<(rows - 1) {
             for c in 0..<cols {
-                // Doom's trick: one random number sets both the cooling and the sideways drift (wind).
-                // ponytail: cooling averages 1.5/row, so flames reach ~8 of 11 rows; tune maxHeat for taller/shorter flames.
                 let rand = Int.random(in: 0...3)
                 let to = (c - rand + 1 + cols) % cols
                 heat[r * cols + to] = max(heat[(r + 1) * cols + c] - rand, 0)
             }
         }
+
+        // 2. Step Knight Rider laser scanner
+        let sweepPhase = Double(steps) * 0.11
+        scannerHead = (sin(sweepPhase) * 0.5 + 0.5) * Double(cols - 1)
+        for c in 0..<cols {
+            scannerTrail[c] *= 0.82
+            let d = abs(Double(c) - scannerHead)
+            if d < 8.0 {
+                scannerTrail[c] = max(scannerTrail[c], 1.0 - d / 8.0)
+            }
+        }
+
+        // 3. Step Tesla lightning arcs
+        let dRows = Self.drawRows
+        var yMain = Double(Int.random(in: max(3, dRows / 2 - 2)...min(dRows - 2, dRows / 2 + 3)))
+        var yFork = yMain + Double(Int.random(in: -2...2))
+        for c in 0..<cols {
+            yMain += Double.random(in: -1.6...1.6)
+            yMain += (Double(dRows) * 0.62 - yMain) * 0.18
+            yMain = min(Double(dRows - 2), max(2.0, yMain))
+            lightningMain[c] = Int(yMain.rounded())
+
+            if c % 9 == 0 {
+                yFork = yMain + Double(Int.random(in: -2...2))
+            } else {
+                yFork += Double.random(in: -1.8...1.8)
+            }
+            yFork = min(Double(dRows - 1), max(1.0, yFork))
+            lightningFork[c] = Int(yFork.rounded())
+        }
     }
 }
 
 extension Fire {
-    private static let pixel: CGFloat = 1.5
+    private static let pixel: CGFloat = 2.0
 
-    /// The fire as an image of tiny squares, for the notch's live activity.
-    func image() -> NSImage {
-        let rows = Fire.rows - 1  // skip the source row
+    /// The selected animation as an image of tiny squares spanning the width and height of the notch.
+    func image(style: AgentAnimationStyle = .fire) -> NSImage {
+        let rows = Fire.drawRows
         let size = NSSize(width: CGFloat(Fire.cols) * Self.pixel, height: CGFloat(rows) * Self.pixel)
         // Drawn lazily at the screen's scale, so it stays crisp on Retina.
         return NSImage(size: size, flipped: true) { _ in
             for r in 0..<rows {
                 for c in 0..<Fire.cols {
-                    guard let color = color(row: r, col: c) else { continue }
+                    guard let color = color(row: r, col: c, style: style) else { continue }
                     color.setFill()
                     NSRect(x: CGFloat(c) * Self.pixel, y: CGFloat(r) * Self.pixel, width: Self.pixel, height: Self.pixel).fill()
                 }

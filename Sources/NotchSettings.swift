@@ -21,6 +21,7 @@ enum Pref {
     static let airDrop = "showAirDrop"
     static let sectionGit = "showSectionGit"
     static let sectionWork = "showSectionWork"
+    static let sectionContainers = "showSectionContainers"
     static let sectionAgents = "showSectionAgents"
     // Agent limits.
     static let claudeDailyLimit = "claudeDailyLimit"
@@ -43,6 +44,11 @@ enum Pref {
     static let glassClosed = "glassClosed"
     static let musicAmbient = "musicAmbient"
     static let musicAmbientIntensity = "musicAmbientIntensity"
+    static let agentAnimation = "agentAnimation"
+    static let agentAnimationAlwaysOn = "agentAnimationAlwaysOn"
+    static let preferredTerminal = "preferredTerminal"
+    static let defaultAgentCommand = "defaultAgentCommand"
+    static let containerCLI = "containerCLI"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -50,9 +56,9 @@ enum Pref {
             agenda: true, mirror: true, replaceHUD: false, widthAdjust: 0.0, heightAdjust: 0.0,
             idleWidth: 48.0,
             tabHome: true, tabShelf: true, tabTopbar: true, music: true, airDrop: true,
-            sectionGit: true, sectionWork: true, sectionAgents: true,
-            claudeDailyLimit: 250_000_000, claudeWeeklyLimit: 1_500_000_000,
-            agyDailyLimit: 25_000_000, agyWeeklyLimit: 100_000_000,
+            sectionGit: true, sectionWork: true, sectionContainers: true, sectionAgents: true,
+            claudeDailyLimit: 12_500_000, claudeWeeklyLimit: 90_000_000,
+            agyDailyLimit: 8_000_000, agyWeeklyLimit: 50_000_000,
             theme: NotchTheme.glass.rawValue,
             glassMaterial: GlassMaterial.ultraThin.rawValue,
             glassBlurOpacity: 0.90,
@@ -68,7 +74,38 @@ enum Pref {
             glassClosed: false,
             musicAmbient: true,
             musicAmbientIntensity: 0.75,
+            agentAnimation: AgentAnimationStyle.fire.rawValue,
+            agentAnimationAlwaysOn: false,
+            preferredTerminal: TerminalApp.auto.rawValue,
+            defaultAgentCommand: "claude",
+            containerCLI: ContainerCLI.auto.rawValue,
         ])
+    }
+}
+
+enum AgentAnimationStyle: String, CaseIterable, Identifiable {
+    case fire = "fire"
+    case scanner = "scanner"
+    case lightning = "lightning"
+    case plasma = "plasma"
+    case matrix = "matrix"
+    case rave = "rave"
+    case warp = "warp"
+    case randomBullshit = "randomBullshit"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .fire:           return "Doom Fire"
+        case .scanner:        return "Laser Scanner (Knight Rider)"
+        case .lightning:      return "Electric Lightning (Tesla Arc)"
+        case .plasma:         return "Liquid Plasma Wave"
+        case .matrix:         return "Matrix Glitch Stream"
+        case .rave:           return "Rainbow Rave"
+        case .warp:           return "Warp Speed Starfield"
+        case .randomBullshit: return "Random Bullshit Go! (Cycle All)"
+        }
     }
 }
 
@@ -163,6 +200,7 @@ struct NotchSettingsView: View {
     @AppStorage(Pref.airDrop) private var airDrop = true
     @AppStorage(Pref.sectionGit) private var sectionGit = true
     @AppStorage(Pref.sectionWork) private var sectionWork = true
+    @AppStorage(Pref.sectionContainers) private var sectionContainers = true
     @AppStorage(Pref.sectionAgents) private var sectionAgents = true
 
     // Theme & Glass settings
@@ -181,6 +219,12 @@ struct NotchSettingsView: View {
     @AppStorage(Pref.glassClosed) private var glassClosed = false
     @AppStorage(Pref.musicAmbient) private var musicAmbient = true
     @AppStorage(Pref.musicAmbientIntensity) private var musicAmbientIntensity = 0.75
+    @AppStorage(Pref.agentAnimation) private var agentAnimation = AgentAnimationStyle.fire.rawValue
+    @AppStorage(Pref.agentAnimationAlwaysOn) private var agentAnimationAlwaysOn = false
+    @AppStorage(Pref.preferredTerminal) private var preferredTerminal = TerminalApp.auto.rawValue
+    @AppStorage(Pref.defaultAgentCommand) private var defaultAgentCommand = "claude"
+    @ObservedObject private var projectStore = ProjectStore.shared
+    @State private var newAgentPreset = ""
     @State private var pinNotchPreview = false
 
     /// The notch always keeps at least one tab, so the last one left on can't be turned off.
@@ -251,7 +295,13 @@ struct NotchSettingsView: View {
                         Slider(value: $widthAdjust, in: -40...80, step: 2) { Text("\(Int(widthAdjust)) pt") }
                     }
                     LabeledContent("Height adjustment") {
-                        Slider(value: $heightAdjust, in: -10...20, step: 1) { Text("\(Int(heightAdjust)) pt") }
+                        HStack(spacing: 8) {
+                            Slider(value: $heightAdjust, in: -15...20, step: 1)
+                            Text("\(Int(heightAdjust)) pt")
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 40, alignment: .trailing)
+                        }
                     }
                 }
             case .theme:
@@ -320,8 +370,18 @@ struct NotchSettingsView: View {
                     }
                 }
             case .activities:
-                Section("Live Activities Beside Notch") {
-                    Toggle("Agents working — Claude / Antigravity (fire)", isOn: $liveAgents)
+                Section("Notch Animation (Agents)") {
+                    Toggle("Play when agents are working (Claude / Antigravity)", isOn: $liveAgents)
+                    Picker("Animation style", selection: $agentAnimation) {
+                        ForEach(AgentAnimationStyle.allCases) { style in
+                            Text(style.title).tag(style.rawValue)
+                        }
+                    }
+                    Toggle("Always play animation (preview / idle)", isOn: $agentAnimationAlwaysOn)
+                    Text("Renders the selected animation across the closed notch's current width and height.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Live Wing Badges") {
                     Toggle("Music playing", isOn: $liveMusic)
                     Toggle("Charger connected / removed", isOn: $liveBattery)
                 }
@@ -347,12 +407,62 @@ struct NotchSettingsView: View {
                 }
                 .disabled(!tabShelf)
 
-                Section("Git, Work & Agents Items") {
+                Section("Git, Work, Containers & Agents Items") {
                     Toggle("Git (pull requests)", isOn: $sectionGit)
-                    Toggle("Work (folders)", isOn: $sectionWork)
+                    Toggle("Work (project runner)", isOn: $sectionWork)
+                    Toggle("Containers (Docker / OrbStack / Podman)", isOn: $sectionContainers)
                     Toggle("Agents", isOn: $sectionAgents)
                 }
                 .disabled(!tabTopbar)
+
+                Section("Work Project Runner & Agents") {
+                    Picker("Terminal app", selection: $preferredTerminal) {
+                        ForEach(TerminalApp.allCases) { term in
+                            Text(term.title).tag(term.rawValue)
+                        }
+                    }
+                    LabeledContent("Default agent CLI") {
+                        TextField("e.g. claude or agy", text: $defaultAgentCommand)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 180)
+                    }
+                    LabeledContent("Add agent preset") {
+                        HStack(spacing: 6) {
+                            TextField("e.g. claude --dangerously-skip-permissions", text: $newAgentPreset)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit {
+                                    projectStore.addAgentPreset(newAgentPreset)
+                                    newAgentPreset = ""
+                                }
+                            Button("Add") {
+                                projectStore.addAgentPreset(newAgentPreset)
+                                newAgentPreset = ""
+                            }
+                            .disabled(newAgentPreset.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(projectStore.agentPresets, id: \.self) { preset in
+                                HStack(spacing: 4) {
+                                    Text(preset)
+                                        .font(.system(.caption, design: .monospaced))
+                                    Button {
+                                        projectStore.removeAgentPreset(preset)
+                                    } label: {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.primary.opacity(0.08), in: Capsule())
+                            }
+                        }
+                    }
+                }
             case .system:
                 Section("Startup") {
                     Toggle("Launch at login", isOn: Binding(
@@ -373,7 +483,7 @@ struct NotchSettingsView: View {
                     .onAppear {
                         launchAtLogin = SMAppService.mainApp.status == .enabled
                     }
-                    Text("Starts TopBar automatically when you log into your Mac.")
+                    Text("Starts BullshitNotch automatically when you log into your Mac.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("System HUD") {
@@ -383,7 +493,7 @@ struct NotchSettingsView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
-                    Button("Quit TopBar", role: .destructive) { NSApp.terminate(nil) }
+                    Button("Quit BullshitNotch", role: .destructive) { NSApp.terminate(nil) }
                 }
             }
         }
@@ -436,7 +546,7 @@ enum NotchSettingsWindow {
     static func show() {
         if window == nil {
             let w = NSWindow(contentViewController: NSHostingController(rootView: NotchSettingsView()))
-            w.title = "TopBar Settings"
+            w.title = "BullshitNotch Settings"
             w.styleMask = [.titled, .closable]
             w.isReleasedWhenClosed = false
             if let screen = NSScreen.main {

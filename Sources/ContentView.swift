@@ -70,6 +70,8 @@ struct ContentView: View {
             content
         case .builtin(.work):
             WorkView()
+        case .builtin(.containers):
+            ContainersView()
         case .builtin(.agents):
             AgentsView()
         case .custom(let id):

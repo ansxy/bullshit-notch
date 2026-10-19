@@ -1,5 +1,6 @@
 # Build artifacts
 .build/
+BullshitNotch.app/
 TopBar.app/
 dist/
 *.dmg

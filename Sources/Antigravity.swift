@@ -127,7 +127,7 @@ final class AntigravitySessions {
         let int = { (k: String) in obj[k] as? Int ?? 0 }
         let key = obj["step_index"] as? Int ?? entry.usage.count
         entry.usage[key] = (
-            int("input_tokens") + int("cache_read_tokens") + int("cache_creation_tokens") + int("cache_write_tokens"),
+            int("input_tokens") + int("cache_creation_tokens") + int("cache_write_tokens") + int("cache_read_tokens") / 10,
             int("output_tokens"))
     }
 }

@@ -296,7 +296,7 @@ final class NowPlaying: ObservableObject {
         if player == .spotify {
             return URL(string: url).flatMap { try? Data(contentsOf: $0) }.flatMap(NSImage.init(data:))
         }
-        let path = NSTemporaryDirectory() + "topbar-artwork"
+        let path = NSTemporaryDirectory() + "bullshitnotch-artwork"
         let script = """
         tell application "Music"
             try

@@ -2,9 +2,9 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>            <string>TopBar</string>
-    <key>CFBundleExecutable</key>      <string>TopBar</string>
-    <key>CFBundleIdentifier</key>      <string>com.ansxy.topbar</string>
+    <key>CFBundleName</key>            <string>BullshitNotch</string>
+    <key>CFBundleExecutable</key>      <string>BullshitNotch</string>
+    <key>CFBundleIdentifier</key>      <string>com.ansxy.bullshitnotch</string>
     <key>CFBundleVersion</key>         <string>1</string>
     <key>CFBundleShortVersionString</key> <string>1.0</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>

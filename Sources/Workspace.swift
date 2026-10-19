@@ -8,6 +8,7 @@ struct WorkspaceView: View {
     @ObservedObject private var music = NowPlaying.shared
     @AppStorage(Pref.sectionGit) private var showGit = true
     @AppStorage(Pref.sectionWork) private var showWork = true
+    @AppStorage(Pref.sectionContainers) private var showContainers = true
     @AppStorage(Pref.sectionAgents) private var showAgents = true
     @AppStorage(Pref.musicAmbient) private var musicAmbient = true
     @State private var section: Tab = .builtin(.git)
@@ -23,9 +24,10 @@ struct WorkspaceView: View {
     private var builtins: [AppSection] {
         AppSection.allCases.filter {
             switch $0 {
-            case .git:    return showGit
-            case .work:   return showWork
-            case .agents: return showAgents
+            case .git:        return showGit
+            case .work:       return showWork
+            case .containers: return showContainers
+            case .agents:     return showAgents
             }
         }
     }
@@ -131,7 +133,9 @@ struct WorkspaceView: View {
                 PRColumn(list: .review)
             }
         case .builtin(.work):
-            FolderGrid().notchCard()
+            ProjectRunnerView().notchCard()
+        case .builtin(.containers):
+            ContainersView().notchCard()
         case .builtin(.agents):
             AgentsView().notchCard()
         case .custom(let id):
@@ -199,38 +203,6 @@ private struct PRColumn: View {
     }
 }
 
-/// ~/work folders as icon tiles.
-private struct FolderGrid: View {
-    private let folders = Work.folders()
-
-    var body: some View {
-        if folders.isEmpty {
-            Text("No folders in ~/work").foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 6)], spacing: 6) {
-                    ForEach(folders, id: \.path) { url in
-                        Button { Work.open(url) } label: {
-                            VStack(spacing: 6) {
-                                Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                                    .resizable()
-                                    .frame(width: 40, height: 40)
-                                Text(url.lastPathComponent).font(.caption).lineLimit(1).truncationMode(.middle)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
-                            .padding(.horizontal, 4)
-                            .contentShape(Rectangle())
-                            .hoverHighlight(radius: 10)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Click: Finder · ⇧ VS Code · ⇧⌘ iTerm")
-                    }
-                }
-            }
-        }
-    }
-}
 
 extension View {
     /// A softly lit rounded panel, the building block of the open notch.

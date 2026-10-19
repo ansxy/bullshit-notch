@@ -26,7 +26,7 @@ final class NotchController: NSObject, NSApplicationDelegate {
 
         // Menu bar icon: one click opens settings (a MenuBarExtra would always open a dropdown).
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "TopBar settings")
+        item.button?.image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "BullshitNotch settings")
         item.button?.target = self
         item.button?.action = #selector(openSettings)
         statusItem = item
@@ -213,6 +213,8 @@ private struct NotchView: View {
     @AppStorage(Pref.glassClosed) private var glassClosed = false
     @AppStorage(Pref.musicAmbient) private var musicAmbient = true
     @AppStorage(Pref.musicAmbientIntensity) private var musicAmbientIntensity = 0.75
+    @AppStorage(Pref.agentAnimation) private var agentAnimation = AgentAnimationStyle.fire.rawValue
+    @AppStorage(Pref.agentAnimationAlwaysOn) private var agentAnimationAlwaysOn = false
 
     @State private var dropTargeted = false
     @State private var breathe = false
@@ -252,10 +254,9 @@ private struct NotchView: View {
     /// The selected tab, or the first visible one if it was just switched off.
     private var currentTab: NotchTab { visibleTabs.contains(model.tab) ? model.tab : visibleTabs[0] }
 
-    private let activeWing: CGFloat = 64  // each live-activity "ear" beside the notch
-    /// Wing width: full width during active HUD/music/agents, or resting width when idle so the notch stays visible.
+    /// Wing width: constant across idle, agent-running, and music/HUD/battery states so the closed notch stays one width and height.
     private var wing: CGFloat {
-        activity != .none ? activeWing : max(0, idleWidth / 2)
+        max(0, idleWidth / 2)
     }
 
     /// Closed: a tight notch. Open: smooth water-drop/slime meniscus at top corners, straight sides, rounded bottom.
@@ -266,7 +267,7 @@ private struct NotchView: View {
     }
 
     private var notch: CGSize {
-        CGSize(width: model.notch.width + widthAdjust, height: model.notch.height + heightAdjust)
+        CGSize(width: max(8, model.notch.width + widthAdjust), height: max(8, model.notch.height + heightAdjust))
     }
 
     /// What shows beside the closed notch, highest priority first.
@@ -274,8 +275,8 @@ private struct NotchView: View {
     private var activity: Activity {
         if hud.visible { return .hud }
         if liveBattery && battery.justChanged { return .battery }
-        if liveAgents && agents.busyCount > 0 { return .agents }
         if liveMusic && music.playing { return .music }
+        if liveAgents && agents.busyCount > 0 { return .agents }
         return .none
     }
 
@@ -453,21 +454,29 @@ private struct NotchView: View {
         }
     }
 
-    /// Glow colour from the live activity: the fire's colour, the album art, the charger, the HUD.
+    private var currentAnimationStyle: AgentAnimationStyle {
+        AgentAnimationStyle(rawValue: agentAnimation) ?? .fire
+    }
+
+    /// Glow colour from the live activity: the animation's colour, the album art, the charger, the HUD.
     private var accent: Color? {
         switch activity {
-        case .agents:  return Color(nsColor: agents.fire.accent)
+        case .agents:  return Color(nsColor: agents.fire.accent(for: currentAnimationStyle))
         case .music:   return music.tint.map { Color(nsColor: $0) } ?? .white
         case .battery: return .green
         case .hud:     return .white
-        case .none:    return nil
+        case .none:    return agentsBurning ? Color(nsColor: agents.fire.accent(for: currentAnimationStyle)) : nil
         }
     }
 
     // MARK: Closed
 
+    private var agentsBurning: Bool { (liveAgents && agents.busyCount > 0) || agentAnimationAlwaysOn }
+
     private var collapsed: some View {
-        HStack(spacing: 0) {
+        let closedWidth = notch.width + wing * 2
+        let animAccent = Color(nsColor: agents.fire.accent(for: currentAnimationStyle))
+        return HStack(spacing: 0) {
             if wing > 0 {
                 leftWing
                     .frame(width: wing)
@@ -480,22 +489,44 @@ private struct NotchView: View {
                     .transition(.opacity)
             }
         }
-        .frame(height: notch.height)
+        .frame(width: closedWidth, height: notch.height)
+        .background(alignment: .bottom) {
+            if agentsBurning {
+                ZStack(alignment: .bottom) {
+                    LinearGradient(
+                        colors: [animAccent.opacity(0.32), .clear],
+                        startPoint: .bottom,
+                        endPoint: .top
+                    )
+                    .frame(width: closedWidth, height: notch.height)
+                    Image(nsImage: agents.fire.image(style: currentAnimationStyle))
+                        .resizable()
+                        .interpolation(.none)
+                        .frame(width: closedWidth, height: notch.height)
+                }
+                .transition(.opacity)
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { model.setExpanded(true) }  // for when "open on hover" is off
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: agentsBurning)
     }
 
     @ViewBuilder private var leftWing: some View {
+        let iconSize = min(22, max(10, min(notch.height - 4, wing - 4)))
         switch activity {
         case .hud:
-            Image(systemName: hudIcon).foregroundStyle(.white)
+            Image(systemName: hudIcon)
+                .font(.system(size: min(13, max(8, notch.height - 6))))
+                .foregroundStyle(.white)
         case .battery:
             Image(systemName: battery.pluggedIn ? "bolt.fill" : "powerplug")
+                .font(.system(size: min(13, max(8, notch.height - 6))))
                 .foregroundStyle(battery.pluggedIn ? .green : .white)
         case .agents:
-            Image(nsImage: agents.fire.image())
+            EmptyView()  // vacant wing slot reserved for future use
         case .music:
-            ArtworkView(image: music.artwork, size: 22, radius: 5)
+            ArtworkView(image: music.artwork, size: iconSize, radius: min(5, iconSize * 0.25))
         case .none:
             EmptyView()
         }
@@ -504,15 +535,16 @@ private struct NotchView: View {
     @ViewBuilder private var rightWing: some View {
         switch activity {
         case .hud:
-            LevelBar(value: hud.muted ? 0 : Double(hud.level)).frame(width: 42, height: 5)
+            LevelBar(value: hud.muted ? 0 : Double(hud.level))
+                .frame(width: min(42, max(10, wing - 8)), height: min(5, max(3, notch.height - 6)))
         case .battery:
             BatteryLabel(battery: battery)
+                .scaleEffect(min(1.0, max(0.65, (notch.height - 2) / 22.0)))
         case .agents:
-            Text("\(agents.busyCount)")
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(Color(nsColor: agents.fire.accent))
+            EmptyView()  // vacant wing slot reserved for future use
         case .music:
-            Visualizer(playing: music.playing).frame(width: 22, height: 14)
+            Visualizer(playing: music.playing)
+                .frame(width: min(22, max(10, wing - 6)), height: min(14, max(6, notch.height - 6)))
         case .none:
             EmptyView()
         }
@@ -588,7 +620,7 @@ private struct NotchView: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Color.clear.frame(width: notch.width)
+            Color.clear.frame(width: model.notch.width)
             HStack(spacing: 12) {
                 if battery.hasBattery { BatteryLabel(battery: battery) }
                 Button { NotchSettingsWindow.show() } label: { Image(systemName: "gearshape.fill") }
@@ -597,7 +629,7 @@ private struct NotchView: View {
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
-        .frame(height: notch.height)
+        .frame(height: model.notch.height)
         .foregroundStyle(.white.opacity(0.85))
     }
 }
@@ -788,7 +820,7 @@ private struct AgendaCard: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 5) {
                     if !agenda.calendarAccess && !agenda.remindersAccess {
-                        Text("Allow Calendars and Reminders for TopBar in System Settings › Privacy & Security.")
+                        Text("Allow Calendars and Reminders for BullshitNotch in System Settings › Privacy & Security.")
                             .foregroundStyle(.secondary)
                     } else if agenda.events.isEmpty && agenda.reminders.isEmpty {
                         Text("Nothing scheduled").foregroundStyle(.secondary)
