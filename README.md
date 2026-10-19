@@ -1,122 +1,63 @@
 # 🔥 BullshitNotch
 
-[![macOS](https://img.shields.io/badge/macOS-14.0%2B%20%28Sonoma%20%2F%20Sequoia%29-blue?logo=apple)](https://www.apple.com/macos/)
-[![Swift](https://img.shields.io/badge/Swift-5.10%20%2F%206.0-orange?logo=swift)](https://swift.org)
-[![Platform](https://img.shields.io/badge/Architecture-Apple%20Silicon%20%26%20Intel-black)](https://github.com/ansxy/top-bar)
+[![macOS](https://img.shields.io/badge/macOS-14.0%2B-black?logo=apple)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-Zero%20Dependencies-orange?logo=swift)](https://swift.org)
+[![Vibe](https://img.shields.io/badge/Vibe-Random%20Bullshit%20Go-ff2d78)](#)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-**Random bullshit go! A living dynamic notch companion and multi-agent AI mission control for macOS.**
+> **Apple gave you a black rectangle at the top of your screen. We stuffed our entire workflow, 4 coding agents, Docker containers, Spotify, and PS1 Doom Fire inside it.**
 
-BullshitNotch turns your MacBook notch into an absurdly packed dynamic island: Doom fire burning underneath the notch when AI agents (Claude Code & Antigravity) are working, Spotify/Apple Music with a breathing multi-color ambient aurora, charger status, volume/brightness HUD, and on hover an expanded workspace with Calendar & Reminders, File Shelf + AirDrop, Git PRs, and Work folders.
-
----
-
-## ✨ Features
-
-- 🌊 **Organic Water-Drop Notch**: Slime and water-drop meniscus Bézier curve that clings naturally to the display bezel with straight lateral edges and fluid corners.
-- 🔥 **AI Agent Mission Control & Full-Width Notch Fire**:
-  - Live activity monitoring for **Claude Code** and **Antigravity** harnesses.
-  - Full-width Doom fire burning right underneath the notch when agents are actively computing.
-  - Side-by-side view showing currently running agent tasks alongside **Daily & Weekly token usage meters and limits**.
-  - Subagent tree inspection and token breakdown.
-- 🎵 **Now Playing & Music Ambient Aurora**:
-  - Real-time album artwork, audio visualizer wave, playback controls, and track scrubber for Apple Music and Spotify.
-  - Diffused album cover backdrop and vibrant multi-color breathing aurora inside the open panel.
-- 📦 **File Shelf & AirDrop**:
-  - Instant drag-and-drop staging zone at the top of your screen to hold files while switching spaces.
-  - One-click AirDrop trigger.
-- 📅 **Agenda & Reminders**:
-  - View today's meetings, countdowns to next events, and check off Reminders inline.
-- 🪞 **Quick Mirror**:
-  - Discreet selfie camera preview to quickly check your framing before video calls.
-- 🎛️ **Modern System HUD**:
-  - Replaces the bulky macOS volume and brightness popup with an elegant, non-intrusive notch overlay.
-- ⚙️ **Categorized Modular Settings**:
-  - Organized tabs (`Notch`, `Theme`, `Activities`, `Tabs`, `Menus`, `System`) to tune glass/ambient effects, toggle individual menus, and configure notch dimensions.
-  - Native **Launch at Login** support.
+![BullshitNotch Screenshot](Resources/screenshot.png)
 
 ---
 
-## 🚀 Quick Install
+## 🤨 What is this?
 
-### Option 1: One-Line Terminal Install (Recommended)
+**BullshitNotch** turns your MacBook notch into an absurdly over-qualified command center that stays **one constant size** when closed, lights itself on fire when your AI agents are cooking, and expands on hover into everything you actually use:
 
-Run this one-liner in your terminal to build and install BullshitNotch into `/Applications`:
+- 🔥 **8 Ridiculous Notch Animations**: **Doom Fire**, **KITT Scanner**, **Tesla Lightning**, **Cyberpunk Plasma**, **Matrix Rain**, **RGB Rave**, **Hyperspace Warp**, or **Random Bullshit Go** (all of them at once).
+- 🤖 **AI Agent Mission Control**: Live sessions & subagent trees for **Claude Code** and **Antigravity**, plus **5-hour session** & **7-day weekly** quota bars (`LIVE` OAuth sync + cache-weighted token math so cached turns don't fake-inflate your usage).
+- 🚀 **Work Project Runner**: Drop your repo folders in, start/stop dev servers with live logs, pop open **Terminal / iTerm**, or launch your project straight into `claude`, `agy`, `codex`, `opencode`, or `aider`.
+- 🐳 **Containers**: Start, stop, tail logs, or shell into **Docker / OrbStack / Podman** containers without touching a terminal.
+- 🎵 **Music + Ambient Aurora**: Spotify & Apple Music controls with a breathing multi-color aurora bled from the album art.
+- 📅 **Calendar, Reminders, Mirror & Shelf**: Join your next meeting, check off tasks, check your face before a call, or drag-and-drop files into the floating Shelf + AirDrop.
 
+---
+
+## ⚡ Install
+
+### One-Liner (Builds & Installs to `/Applications`)
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ansxy/top-bar/main/install.sh | bash
 ```
 
-Or clone the repository and run the installer:
-
+### Or Download the `.dmg`
+Grab **`BullshitNotch.dmg`** from [Releases](https://github.com/ansxy/top-bar/releases), drag `BullshitNotch.app` to **Applications**, and if macOS Gatekeeper complains because we didn't pay Tim Cook $99/yr:
 ```bash
-git clone https://github.com/ansxy/top-bar.git
-cd top-bar
-./install.sh
-```
-
-### Option 2: Pre-Built DMG
-
-1. Download `BullshitNotch.dmg` from the [Latest Release](https://github.com/ansxy/top-bar/releases).
-2. Open `BullshitNotch.dmg` and drag `BullshitNotch.app` into **Applications**.
-3. **If macOS blocks BullshitNotch ("Apple could not verify BullshitNotch is free of malware"):**
-   Because BullshitNotch is signed ad-hoc rather than with a paid Apple Developer ID, macOS Gatekeeper quarantines downloaded `.dmg` files. Remove the quarantine flag by running:
-   ```bash
-   xattr -cr /Applications/BullshitNotch.app && open /Applications/BullshitNotch.app
-   ```
-   *(Or click **Done** on the popup, then go to **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**).*
-4. Launch **BullshitNotch** from Launchpad, Spotlight, or Applications.
-
-### Option 3: Local Development Build
-
-```bash
-git clone https://github.com/ansxy/top-bar.git
-cd top-bar
-./build.sh
+xattr -cr /Applications/BullshitNotch.app && open /Applications/BullshitNotch.app
 ```
 
 ---
 
-## 🕹️ How to Use
+## 🛠️ Build It Yourself
 
-- **Open the Notch**: Move your cursor over the notch at the top center of your display, or click / swipe down.
-- **Drag & Drop Files**: Drag any file to the notch from Finder; the notch opens automatically and reveals the Shelf.
-- **Settings**: Click the BullshitNotch menu bar icon or open the Notch settings to configure tabs, limits, and behavior.
-- **Start at Boot**: Open BullshitNotch Settings → **System** → Turn on **Launch at login**.
+Zero third-party packages. Pure Swift + AppKit/SwiftUI:
 
----
+```bash
+git clone https://github.com/ansxy/top-bar.git
+cd top-bar
+./build.sh      # Build & launch BullshitNotch.app
+./package.sh    # Build universal dist/BullshitNotch.dmg & BullshitNotch.zip
+```
 
-## ⚙️ Requirements & Permissions
-
-- **OS**: macOS 14.0 (Sonoma) or macOS 15+ (Sequoia).
-- **Hardware**: MacBook Pro / Air (with or without physical notch) or any Mac with an external monitor.
-- **Compiler**: Xcode Command Line Tools (`xcode-select --install`) if building from source.
-
-### Permissions:
-- **Accessibility**: Required only if you enable *Replace volume and brightness HUD* in Settings → System.
-- **Calendars & Reminders**: Prompted when first viewing the Agenda widget.
-- **Camera**: Prompted when viewing the Mirror preview.
-- **Apple Events (Automation)**: Prompted to query track details from Spotify or Apple Music.
-- **GitHub CLI**: Install and authenticate `gh` (`gh auth login`) to view pull requests in the Workspace tab.
-
----
-
-## 🗑️ Uninstallation
-
-Run the uninstaller script or delete the application:
+## 🗑️ Uninstall
 
 ```bash
 ./uninstall.sh
-```
-
-Or manually delete `/Applications/BullshitNotch.app` and run:
-
-```bash
-defaults delete com.ansxy.bullshitnotch
 ```
 
 ---
 
 ## 📄 License
 
-Distributed under the MIT License. See [LICENSE](LICENSE) for details.
+MIT — [LICENSE](LICENSE). Random bullshit go. 🌙
