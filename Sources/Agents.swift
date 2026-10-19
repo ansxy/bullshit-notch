@@ -123,11 +123,16 @@ final class AgentStore: ObservableObject {
         var total: (input: Int, output: Int) { usage.values.reduce((0, 0)) { ($0.0 + $1.0, $0.1 + $1.1) } }
     }
     private var parsed: [URL: Parsed] = [:]
+    private var isDemo = false
 
     private init() {
-        refresh()
-        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
-            Task { @MainActor in AgentStore.shared.refresh() }
+        if CommandLine.arguments.contains("--demo") {
+            loadDemoData()
+        } else {
+            refresh()
+            Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+                Task { @MainActor in AgentStore.shared.refresh() }
+            }
         }
         Timer.scheduledTimer(withTimeInterval: 0.07, repeats: true) { _ in
             Task { @MainActor in
@@ -143,7 +148,29 @@ final class AgentStore: ObservableObject {
         }
     }
 
+    func loadDemoData() {
+        isDemo = true
+        let nowMs = Date.now.timeIntervalSince1970 * 1000
+        agents = [
+            Agent(harness: .claude, pid: 42069, sessionId: "demo-1", cwd: "/Users/dev/work/bullshit-notch", name: "Add Doom fire & 8 notch animations", status: "busy", startedAt: nowMs - 220_000, statusUpdatedAt: nowMs - 12_000),
+            Agent(harness: .antigravity, pid: 42070, sessionId: "demo-2", cwd: "/Users/dev/work/hyperdrive-engine", name: "Rewrite warp stabilizer in Rust", status: "busy", startedAt: nowMs - 95_000, statusUpdatedAt: nowMs - 5_000),
+            Agent(harness: .claude, pid: 42071, sessionId: "demo-3", cwd: "/Users/dev/work/prod-cluster", name: "Fix Friday afternoon deploy script", status: "waiting", startedAt: nowMs - 640_000, statusUpdatedAt: nowMs - 45_000)
+        ]
+        tokens = [
+            "demo-1": (input: 142_000, output: 48_500),
+            "demo-2": (input: 94_000, output: 31_200),
+            "demo-3": (input: 210_000, output: 64_000)
+        ]
+        subagents = [
+            "demo-1": [
+                SubAgent(id: "sub-1", description: "Tuning pixel shader palette", type: "code", started: .now.addingTimeInterval(-80), lastActive: .now, finished: false, tokens: (28_400, 9_100))
+            ]
+        ]
+        for _ in 0..<45 { fire.step() }
+    }
+
     func refresh() {
+        if isDemo { return }
         let files = (try? FileManager.default.contentsOfDirectory(
             at: claude.appendingPathComponent("sessions"), includingPropertiesForKeys: nil)) ?? []
         let claudeAgents = files
@@ -232,7 +259,7 @@ final class AgentStore: ObservableObject {
 
 struct AgentsView: View {
     @ObservedObject private var store = AgentStore.shared
-    @State private var filter: Harness?  // nil = all
+    @State private var filter: Harness? = CommandLine.arguments.contains("--demo") ? .claude : nil  // nil = all
     @Namespace private var pill
 
     private var shown: [Agent] { store.agents.filter { filter == nil || $0.harness == filter } }

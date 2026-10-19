@@ -14,12 +14,56 @@ final class Agenda: ObservableObject {
 
     private let store = EKEventStore()
     private var started = false
+    private var isDemo = false
     private var lastKnownToday = Calendar.current.startOfDay(for: .now)
 
-    private init() {}
+    private init() {
+        if CommandLine.arguments.contains("--demo") {
+            loadDemoData()
+        }
+    }
+
+    func loadDemoData() {
+        isDemo = true
+        started = true
+        calendarAccess = true
+        remindersAccess = true
+
+        let cal1 = EKCalendar(for: .event, eventStore: store)
+        cal1.title = "Work"
+        cal1.color = .systemOrange
+        let cal2 = EKCalendar(for: .event, eventStore: store)
+        cal2.title = "Engineering"
+        cal2.color = .systemCyan
+        let cal3 = EKCalendar(for: .event, eventStore: store)
+        cal3.title = "Personal"
+        cal3.color = .systemPurple
+
+        let ev1 = EKEvent(eventStore: store)
+        ev1.title = "Explain why 1 line took 4 days"
+        ev1.startDate = Calendar.current.date(bySettingHour: 10, minute: 30, second: 0, of: .now) ?? .now
+        ev1.endDate = Calendar.current.date(bySettingHour: 11, minute: 0, second: 0, of: .now) ?? .now
+        ev1.calendar = cal1
+
+        let ev2 = EKEvent(eventStore: store)
+        ev2.title = "Deploy to Prod on Friday (YOLO)"
+        ev2.startDate = Calendar.current.date(bySettingHour: 15, minute: 0, second: 0, of: .now) ?? .now
+        ev2.endDate = Calendar.current.date(bySettingHour: 16, minute: 0, second: 0, of: .now) ?? .now
+        ev2.location = "https://meet.google.com/yolo-prod-friday"
+        ev2.calendar = cal2
+
+        events = [ev1, ev2]
+        nextMeeting = ev2
+        nextMeetingLink = URL(string: "https://meet.google.com/yolo-prod-friday")
+
+        let rem1 = EKReminder(eventStore: store)
+        rem1.title = "rm -rf node_modules & pray"
+        reminders = [rem1]
+    }
 
     /// Asks for access the first time the agenda is shown, and refreshes every subsequent time it appears.
     func start() {
+        if isDemo { return }
         if started {
             checkAuthorizationAndReload(resetCache: true)
             return
@@ -73,6 +117,7 @@ final class Agenda: ObservableObject {
     /// Re-checks TCC status (in case permissions were toggled in System Settings), resets stale EventKit caches,
     /// rolls the selected day forward across midnight, and reloads events + reminders.
     func checkAuthorizationAndReload(resetCache: Bool = false) {
+        if isDemo { return }
         let evStatus = EKEventStore.authorizationStatus(for: .event)
         let remStatus = EKEventStore.authorizationStatus(for: .reminder)
         let newCalAccess = (evStatus == .fullAccess)
@@ -106,6 +151,7 @@ final class Agenda: ObservableObject {
     }
 
     func reload() {
+        if isDemo { return }
         guard let end = Calendar.current.date(byAdding: .day, value: 1, to: day) else { return }
         if calendarAccess {
             events = store.events(matching: store.predicateForEvents(withStart: day, end: end, calendars: nil))

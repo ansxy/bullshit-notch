@@ -62,6 +62,94 @@ final class NotchController: NSObject, NSApplicationDelegate {
             MainActor.assumeIsolated { self?.scroll(event) }
             return event
         } as Any)
+
+        if CommandLine.arguments.contains("--demo") {
+            model.pinnedPreview = true
+            model.setExpanded(true)
+            if CommandLine.arguments.contains("--capture-readme") {
+                captureReadmeScreenshots(host: host)
+            }
+        }
+    }
+
+    private func captureReadmeScreenshots(host: NSView) {
+        let outDir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("Resources")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            let homeCG = Self.captureTopRegion(of: host, widthPt: 690, heightPt: 236)
+            if let homeCG {
+                Self.savePNG(homeCG, to: outDir.appendingPathComponent("screenshot-home.png"))
+            }
+            self.model.tab = .topbar
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                let agentsCG = Self.captureTopRegion(of: host, widthPt: 690, heightPt: 396)
+                if let agentsCG {
+                    Self.savePNG(agentsCG, to: outDir.appendingPathComponent("screenshot-agents.png"))
+                }
+                if let homeCG, let agentsCG {
+                    Self.saveCombinedShowcase(home: homeCG, agents: agentsCG, to: outDir.appendingPathComponent("screenshot.png"))
+                }
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    private static func captureTopRegion(of view: NSView, widthPt: CGFloat, heightPt: CGFloat) -> CGImage? {
+        view.layoutSubtreeIfNeeded()
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let full = rep.cgImage else { return nil }
+        let scale = CGFloat(full.width) / view.bounds.width
+        let wPx = Int(widthPt * scale)
+        let hPx = Int(heightPt * scale)
+        let xPx = max(0, (full.width - wPx) / 2)
+        // CGImage origin (0,0) is top-left, which is where the notch sits!
+        return full.cropping(to: CGRect(x: xPx, y: 0, width: wPx, height: min(hPx, full.height)))
+    }
+
+    private static func savePNG(_ cgImage: CGImage, to url: URL) {
+        let rep = NSBitmapImageRep(cgImage: cgImage)
+        if let png = rep.representation(using: .png, properties: [:]) {
+            try? png.write(to: url)
+        }
+    }
+
+    private static func saveCombinedShowcase(home: CGImage, agents: CGImage, to url: URL) {
+        let pad = 48
+        let gap = 36
+        let width = max(home.width, agents.width) + pad * 2
+        let height = home.height + agents.height + pad * 2 + gap
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return }
+
+        // Subtle dark macOS desktop background so the curved black notch silhouette is crisp
+        let colors = [
+            CGColor(red: 0.08, green: 0.09, blue: 0.14, alpha: 1),
+            CGColor(red: 0.05, green: 0.05, blue: 0.09, alpha: 1)
+        ] as CFArray
+        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+            ctx.drawLinearGradient(grad, start: CGPoint(x: 0, y: CGFloat(height)), end: CGPoint(x: CGFloat(width), y: 0), options: [])
+        }
+
+        // Top: Home tab (CGContext origin is bottom-left)
+        let homeX = (width - home.width) / 2
+        let homeY = height - pad - home.height
+        ctx.draw(home, in: CGRect(x: homeX, y: homeY, width: home.width, height: home.height))
+
+        // Bottom: Agents / Workspace tab
+        let agentsX = (width - agents.width) / 2
+        let agentsY = pad
+        ctx.draw(agents, in: CGRect(x: agentsX, y: agentsY, width: agents.width, height: agents.height))
+
+        if let outCG = ctx.makeImage() {
+            savePNG(outCG, to: url)
+        }
     }
 
     @objc private func openSettings() {

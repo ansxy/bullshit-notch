@@ -69,7 +69,13 @@ final class NowPlaying: ObservableObject {
         return palette ?? Self.seedPalette(for: "\(title)|\(artist)")
     }
 
+    private var isDemo = false
+
     private init() {
+        if CommandLine.arguments.contains("--demo") {
+            loadDemoData()
+            return
+        }
         let center = DistributedNotificationCenter.default()
         for (name, player) in [("com.spotify.client.PlaybackStateChanged", Player.spotify),
                                ("com.apple.Music.playerInfo", .music)] {
@@ -78,6 +84,29 @@ final class NowPlaying: ObservableObject {
             }
         }
         refresh(prefer: nil)
+    }
+
+    func loadDemoData() {
+        isDemo = true
+        player = .spotify
+        title = "Lofi Beats to Hallucinate To"
+        artist = "DJ Stochastic Parrot"
+        playing = true
+        duration = 260
+        position = 134
+        positionAt = .now
+
+        let size = NSSize(width: 240, height: 240)
+        let img = NSImage(size: size)
+        img.lockFocus()
+        let grad = NSGradient(colors: [
+            NSColor(calibratedRed: 0.95, green: 0.22, blue: 0.48, alpha: 1),
+            NSColor(calibratedRed: 0.98, green: 0.52, blue: 0.16, alpha: 1),
+            NSColor(calibratedRed: 0.42, green: 0.16, blue: 0.78, alpha: 1)
+        ])
+        grad?.draw(in: NSRect(origin: .zero, size: size), angle: 135)
+        img.unlockFocus()
+        artwork = img
     }
 
     func elapsed(at date: Date) -> Double {

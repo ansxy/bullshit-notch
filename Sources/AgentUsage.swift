@@ -93,13 +93,59 @@ final class AgentUsageTracker: ObservableObject {
     private let geminiDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini")
     private var cachedKeychainToken: String? = nil
     private var timer: Timer?
+    private var isDemo = false
 
     init() {
         migrateLegacyLimitsIfNeeded()
+        if CommandLine.arguments.contains("--demo") {
+            loadDemoData()
+            return
+        }
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+    }
+
+    func loadDemoData() {
+        isDemo = true
+        claudeOAuthConnected = true
+        claudeStats = UsageStats(
+            sessionInput: 418_000,
+            sessionOutput: 142_000,
+            sessionCacheWrite: 1_240_000,
+            sessionCacheRead: 3_800_000,
+            sessionOldestInWindow: .now.addingTimeInterval(-3.2 * 3600),
+            dailyInput: 1_120_000,
+            dailyOutput: 390_000,
+            dailyCacheWrite: 2_900_000,
+            dailyCacheRead: 8_400_000,
+            weeklyInput: 3_400_000,
+            weeklyOutput: 1_180_000,
+            weeklyCacheWrite: 9_800_000,
+            weeklyCacheRead: 26_500_000,
+            weeklyOldestInWindow: .now.addingTimeInterval(-4.5 * 86400),
+            liveFiveHourPercent: 62.0,
+            liveFiveHourResetsAt: .now.addingTimeInterval(1.8 * 3600),
+            liveSevenDayPercent: 48.0,
+            liveSevenDayResetsAt: .now.addingTimeInterval(4.2 * 86400)
+        )
+        agyStats = UsageStats(
+            sessionInput: 290_000,
+            sessionOutput: 110_000,
+            sessionCacheWrite: 2_500_000,
+            sessionCacheRead: 2_100_000,
+            sessionOldestInWindow: .now.addingTimeInterval(-2.7 * 3600),
+            dailyInput: 640_000,
+            dailyOutput: 245_000,
+            dailyCacheWrite: 4_100_000,
+            dailyCacheRead: 4_800_000,
+            weeklyInput: 2_100_000,
+            weeklyOutput: 780_000,
+            weeklyCacheWrite: 12_400_000,
+            weeklyCacheRead: 14_200_000,
+            weeklyOldestInWindow: .now.addingTimeInterval(-5 * 86400)
+        )
     }
 
     /// Migrates old 100%-cache-inflated default limits (250M/1.5B) to realistic effective-token limits.
@@ -116,6 +162,7 @@ final class AgentUsageTracker: ObservableObject {
     }
 
     func refresh() {
+        if isDemo { return }
         isRefreshing = true
         let claude = claudeDir
         let gemini = geminiDir

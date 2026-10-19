@@ -11,7 +11,7 @@ struct WorkspaceView: View {
     @AppStorage(Pref.sectionContainers) private var showContainers = true
     @AppStorage(Pref.sectionAgents) private var showAgents = true
     @AppStorage(Pref.musicAmbient) private var musicAmbient = true
-    @State private var section: Tab = .builtin(.git)
+    @State private var section: Tab = CommandLine.arguments.contains("--demo") ? .builtin(.agents) : .builtin(.git)
     @State private var adding = false
     @State private var newName = ""
     @Namespace private var pill
