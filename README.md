@@ -65,6 +65,10 @@ cd top-bar
 
 ---
 
+## 🙌 Credits & Inspiration
+
+Inspired by and built on the dynamic notch concept from [**boring.notch**](https://github.com/TheBoredTeam/boring.notch) — taken off the rails with multi-agent harnesses, token quota tracking, project & container runners, and 8 absurd notch animations.
+
 ## 📄 License
 
 MIT — [LICENSE](LICENSE). Random bullshit go. 🌙
