@@ -3,7 +3,7 @@ set -e
 
 # ==============================================================================
 # BullshitNotch Installer for macOS (14+)
-# https://github.com/ansxy/top-bar
+# https://github.com/ansxy/bullshit-notch
 # ==============================================================================
 
 BOLD="\033[1m"
@@ -49,7 +49,7 @@ if [[ -f "$SCRIPT_DIR/Package.swift" && -d "$SCRIPT_DIR/Sources" ]]; then
 else
     echo -e "${CYAN}==>${RESET} Downloading latest BullshitNotch source from GitHub..."
     TEMP_DIR=$(mktemp -d)
-    git clone --depth 1 https://github.com/ansxy/top-bar.git "$TEMP_DIR"
+    git clone --depth 1 https://github.com/ansxy/bullshit-notch.git "$TEMP_DIR"
     SOURCE_DIR="$TEMP_DIR"
 fi
 
@@ -121,7 +121,7 @@ download_prebuilt() {
     echo -e "${CYAN}==>${RESET} Downloading pre-built BullshitNotch.app from GitHub Releases..."
     local zip_tmp
     zip_tmp="$(mktemp -d)/BullshitNotch.zip"
-    if curl -fsSL "https://github.com/ansxy/top-bar/releases/latest/download/BullshitNotch.zip" -o "$zip_tmp"; then
+    if curl -fsSL "https://github.com/ansxy/bullshit-notch/releases/latest/download/BullshitNotch.zip" -o "$zip_tmp"; then
         rm -rf "$BUILD_APP"
         ditto -x -k "$zip_tmp" "$SOURCE_DIR"
         rm -f "$zip_tmp"

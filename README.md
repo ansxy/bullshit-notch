@@ -35,11 +35,11 @@
 
 ### One-Liner (Builds & Installs to `/Applications`)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ansxy/top-bar/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ansxy/bullshit-notch/main/install.sh | bash
 ```
 
 ### Or Download the `.dmg`
-Grab **`BullshitNotch.dmg`** from [Releases](https://github.com/ansxy/top-bar/releases), drag `BullshitNotch.app` to **Applications**, and if macOS Gatekeeper complains because we didn't pay Tim Cook $99/yr:
+Grab **`BullshitNotch.dmg`** from [Releases](https://github.com/ansxy/bullshit-notch/releases), drag `BullshitNotch.app` to **Applications**, and if macOS Gatekeeper complains because we didn't pay Tim Cook $99/yr:
 ```bash
 xattr -cr /Applications/BullshitNotch.app && open /Applications/BullshitNotch.app
 ```
@@ -51,8 +51,8 @@ xattr -cr /Applications/BullshitNotch.app && open /Applications/BullshitNotch.ap
 Zero third-party packages. Pure Swift + AppKit/SwiftUI:
 
 ```bash
-git clone https://github.com/ansxy/top-bar.git
-cd top-bar
+git clone https://github.com/ansxy/bullshit-notch.git
+cd bullshit-notch
 ./build.sh      # Build & launch BullshitNotch.app
 ./package.sh    # Build universal dist/BullshitNotch.dmg & BullshitNotch.zip
 ```

@@ -79,7 +79,7 @@ METHOD B: Using macOS System Settings (No Terminal)
 4. Click "Open Anyway" next to "BullshitNotch.app was blocked".
 
 ====================================================================
-Source code: https://github.com/ansxy/top-bar
+Source code: https://github.com/ansxy/bullshit-notch
 EOF
 
 hdiutil create -volname "BullshitNotch" \
