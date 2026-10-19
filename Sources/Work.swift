@@ -64,13 +64,18 @@ final class ProjectStore: ObservableObject {
 
     static let defaultPresets = ["claude", "agy", "codex", "opencode", "aider"]
 
+    private var isDemo = false
+
     private init() {
+        agentPresets = Self.defaultPresets
+        if CommandLine.arguments.contains("--demo") {
+            loadDemoData()
+            return
+        }
         if let data = UserDefaults.standard.data(forKey: presetsKey),
            let decoded = try? JSONDecoder().decode([String].self, from: data),
            !decoded.isEmpty {
             agentPresets = decoded
-        } else {
-            agentPresets = Self.defaultPresets
         }
 
         if let data = UserDefaults.standard.data(forKey: projectsKey),
@@ -88,6 +93,15 @@ final class ProjectStore: ObservableObject {
             }
             projects = initial
         }
+    }
+
+    func loadDemoData() {
+        isDemo = true
+        let p1 = ProjectItem(name: "bullshit-notch", path: "~/work/bullshit-notch", serviceCommand: "./build.sh", agentCommand: "claude")
+        let p2 = ProjectItem(name: "hyperdrive-api", path: "~/work/hyperdrive-api", serviceCommand: "pnpm run dev", agentCommand: "agy")
+        let p3 = ProjectItem(name: "rust-notch-port", path: "~/work/rust-notch-port", serviceCommand: "cargo run --release", agentCommand: "codex")
+        projects = [p1, p2, p3]
+        runningIDs = [p2.id]
     }
 
     // MARK: - CRUD
@@ -482,12 +496,14 @@ final class ProjectStore: ObservableObject {
     // MARK: - Persistence
 
     private func saveProjects() {
+        if isDemo { return }
         if let data = try? JSONEncoder().encode(projects) {
             UserDefaults.standard.set(data, forKey: projectsKey)
         }
     }
 
     private func savePresets() {
+        if isDemo { return }
         if let data = try? JSONEncoder().encode(agentPresets) {
             UserDefaults.standard.set(data, forKey: presetsKey)
         }

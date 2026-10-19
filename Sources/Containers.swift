@@ -54,10 +54,29 @@ final class ContainerStore: ObservableObject {
     @Published private(set) var errorMessage: String?
 
     private var pollTimer: Timer?
+    private var isDemo = false
 
-    private init() {}
+    private init() {
+        if CommandLine.arguments.contains("--demo") {
+            loadDemoData()
+        }
+    }
+
+    func loadDemoData() {
+        isDemo = true
+        engineRunning = true
+        orbStackInstalled = true
+        orbStackRunning = true
+        activeBackendName = "OrbStack"
+        containers = [
+            ContainerItem(id: "c1a2b3c4d5e6", name: "postgres-prod-local", image: "postgres:16-alpine", state: "running", status: "Up 4 hours", ports: [5432], rawPorts: "0.0.0.0:5432->5432/tcp", composeProject: "bullshit-stack", cli: "docker"),
+            ContainerItem(id: "f6e5d4c3b2a1", name: "redis-cache", image: "redis:7-alpine", state: "running", status: "Up 4 hours", ports: [6379], rawPorts: "0.0.0.0:6379->6379/tcp", composeProject: "bullshit-stack", cli: "docker"),
+            ContainerItem(id: "998877665544", name: "otel-collector", image: "otel/opentelemetry-collector:latest", state: "exited", status: "Exited (0) 12 minutes ago", ports: [], rawPorts: "", composeProject: "monitoring", cli: "docker")
+        ]
+    }
 
     func startPolling() {
+        if isDemo { return }
         refresh()
         guard pollTimer == nil else { return }
         pollTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
@@ -73,6 +92,7 @@ final class ContainerStore: ObservableObject {
     }
 
     func refresh(silent: Bool = false) {
+        if isDemo { return }
         if !silent { isLoading = true }
         let cliPrefRaw = UserDefaults.standard.string(forKey: Pref.containerCLI) ?? ContainerCLI.auto.rawValue
         let cliPref = ContainerCLI(rawValue: cliPrefRaw) ?? .auto

@@ -1,5 +1,6 @@
 import AppKit
 import EventKit
+import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -64,12 +65,140 @@ final class NotchController: NSObject, NSApplicationDelegate {
         } as Any)
 
         if CommandLine.arguments.contains("--demo") {
-            model.pinnedPreview = true
-            model.setExpanded(true)
-            if CommandLine.arguments.contains("--capture-readme") {
-                captureReadmeScreenshots(host: host)
+            if CommandLine.arguments.contains("--capture-gif") {
+                captureDemoGif(host: host)
+            } else {
+                model.pinnedPreview = true
+                model.setExpanded(true)
+                if CommandLine.arguments.contains("--capture-readme") {
+                    captureReadmeScreenshots(host: host)
+                }
             }
         }
+    }
+
+    private func captureDemoGif(host: NSView) {
+        let outURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+            .appendingPathComponent("Resources/demo.gif")
+
+        let d = UserDefaults.standard
+        let savedAnim = d.string(forKey: Pref.agentAnimation) ?? AgentAnimationStyle.fire.rawValue
+        let savedAlwaysOn = d.bool(forKey: Pref.agentAnimationAlwaysOn)
+        let savedLiveAgents = d.bool(forKey: Pref.liveAgents)
+
+        // Start closed with music wings + full-width animation burning
+        d.set(true, forKey: Pref.agentAnimationAlwaysOn)
+        d.set(false, forKey: Pref.liveAgents)
+        d.set(AgentAnimationStyle.fire.rawValue, forKey: Pref.agentAnimation)
+        model.pinnedPreview = false
+        model.setExpanded(false)
+        model.tab = .home
+
+        var frameIndex = 0
+        let totalFrames = 160 // 8.0s at 20fps
+        var capturedFrames: [CGImage] = []
+
+        Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self else { timer.invalidate(); return }
+                let defaults = UserDefaults.standard
+
+                switch frameIndex {
+                case 0:
+                    defaults.set(AgentAnimationStyle.fire.rawValue, forKey: Pref.agentAnimation)
+                case 12:
+                    defaults.set(AgentAnimationStyle.plasma.rawValue, forKey: Pref.agentAnimation)
+                case 24:
+                    defaults.set(AgentAnimationStyle.matrix.rawValue, forKey: Pref.agentAnimation)
+                case 36:
+                    defaults.set(AgentAnimationStyle.randomBullshit.rawValue, forKey: Pref.agentAnimation)
+                case 48:
+                    defaults.set(true, forKey: Pref.liveAgents)
+                    self.model.tab = .home
+                    self.model.pinnedPreview = true
+                    self.model.setExpanded(true)
+                case 80:
+                    withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+                        self.model.tab = .topbar
+                    }
+                case 108:
+                    NotificationCenter.default.post(name: Notification.Name("DemoSwitchSection"), object: AppSection.work)
+                case 128:
+                    NotificationCenter.default.post(name: Notification.Name("DemoSwitchSection"), object: AppSection.containers)
+                case 146:
+                    defaults.set(false, forKey: Pref.liveAgents)
+                    defaults.set(AgentAnimationStyle.fire.rawValue, forKey: Pref.agentAnimation)
+                    self.model.pinnedPreview = false
+                    self.model.setExpanded(false)
+                default:
+                    break
+                }
+
+                if let cg = Self.captureTopRegion(of: host, widthPt: 670, heightPt: 404),
+                   let framed = Self.frameOnDarkBackdrop(cg, padX: 28, padBottom: 24) {
+                    capturedFrames.append(framed)
+                }
+
+                frameIndex += 1
+                if frameIndex >= totalFrames {
+                    timer.invalidate()
+                    defaults.set(savedAnim, forKey: Pref.agentAnimation)
+                    defaults.set(savedAlwaysOn, forKey: Pref.agentAnimationAlwaysOn)
+                    defaults.set(savedLiveAgents, forKey: Pref.liveAgents)
+                    Self.saveAnimatedGIF(frames: capturedFrames, to: outURL)
+                    NSApp.terminate(nil)
+                }
+            }
+        }
+    }
+
+    private static func saveAnimatedGIF(frames: [CGImage], to outURL: URL) {
+        guard !frames.isEmpty,
+              let dest = CGImageDestinationCreateWithURL(outURL as CFURL, UTType.gif.identifier as CFString, frames.count, nil) else { return }
+        let gifProps = [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]] as CFDictionary
+        let frameProps = [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: 0.05, kCGImagePropertyGIFUnclampedDelayTime: 0.05]] as CFDictionary
+        CGImageDestinationSetProperties(dest, gifProps)
+        let targetWidth = 780
+        for cg in frames {
+            let targetHeight = Int(Double(cg.height) * Double(targetWidth) / Double(cg.width))
+            guard let ctx = CGContext(
+                data: nil, width: targetWidth, height: targetHeight,
+                bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { continue }
+            ctx.interpolationQuality = .high
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: targetWidth, height: targetHeight))
+            if let scaled = ctx.makeImage() {
+                CGImageDestinationAddImage(dest, scaled, frameProps)
+            }
+        }
+        CGImageDestinationFinalize(dest)
+    }
+
+    private static func frameOnDarkBackdrop(_ cg: CGImage, padX: Int, padBottom: Int) -> CGImage? {
+        let width = cg.width + padX * 2
+        let height = cg.height + padBottom
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        let colors = [
+            CGColor(red: 0.08, green: 0.09, blue: 0.14, alpha: 1),
+            CGColor(red: 0.04, green: 0.05, blue: 0.08, alpha: 1)
+        ] as CFArray
+        if let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
+            ctx.drawLinearGradient(grad, start: CGPoint(x: 0, y: CGFloat(height)), end: CGPoint(x: CGFloat(width), y: 0), options: [])
+        }
+        // Top-aligned so the top edge of the notch sits flush with the top edge of the frame!
+        ctx.draw(cg, in: CGRect(x: padX, y: padBottom, width: cg.width, height: cg.height))
+        return ctx.makeImage()
     }
 
     private func captureReadmeScreenshots(host: NSView) {

@@ -7,7 +7,14 @@
 
 > **Apple gave you a black rectangle at the top of your screen. We stuffed our entire workflow, 4 coding agents, Docker containers, Spotify, and PS1 Doom Fire inside it.**
 
+![BullshitNotch Live Demo](Resources/demo.gif)
+
+<details>
+<summary>📸 View Full High-Res Static Screenshot</summary>
+
 ![BullshitNotch Screenshot](Resources/screenshot.png)
+
+</details>
 
 ---
 

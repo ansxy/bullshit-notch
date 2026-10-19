@@ -44,6 +44,13 @@ struct WorkspaceView: View {
             content.frame(height: 300)
         }
         .onAppear { store.start() }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DemoSwitchSection"))) { note in
+            if let appSec = note.object as? AppSection {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    section = .builtin(appSec)
+                }
+            }
+        }
     }
 
     private var pills: some View {
