@@ -5,13 +5,19 @@ import SwiftUI
 struct WorkspaceView: View {
     @EnvironmentObject private var store: PullRequestStore
     @EnvironmentObject private var custom: CustomStore
+    @ObservedObject private var music = NowPlaying.shared
     @AppStorage(Pref.sectionGit) private var showGit = true
     @AppStorage(Pref.sectionWork) private var showWork = true
     @AppStorage(Pref.sectionAgents) private var showAgents = true
+    @AppStorage(Pref.musicAmbient) private var musicAmbient = true
     @State private var section: Tab = .builtin(.git)
     @State private var adding = false
     @State private var newName = ""
     @Namespace private var pill
+
+    private var palette: NowPlaying.Palette? {
+        musicAmbient ? music.activePalette : nil
+    }
 
     /// Built-in sections switched on in Settings.
     private var builtins: [AppSection] {
@@ -90,7 +96,25 @@ struct WorkspaceView: View {
                 .padding(.vertical, 5)
                 .background {
                     if current == tab {
-                        Capsule().fill(.white.opacity(0.16)).matchedGeometryEffect(id: "pill", in: pill)
+                        if let palette {
+                            Capsule()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            palette.primaryColor.opacity(0.38),
+                                            palette.secondaryColor.opacity(0.30)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                                .overlay(
+                                    Capsule().strokeBorder(palette.primaryColor.opacity(0.5), lineWidth: 0.8)
+                                )
+                                .matchedGeometryEffect(id: "pill", in: pill)
+                        } else {
+                            Capsule().fill(.white.opacity(0.16)).matchedGeometryEffect(id: "pill", in: pill)
+                        }
                     }
                 }
                 .foregroundStyle(current == tab ? .primary : .secondary)
@@ -229,14 +253,19 @@ extension View {
 
 private struct NotchCardBackground: ViewModifier {
     let radius: CGFloat
+    @ObservedObject private var music = NowPlaying.shared
     @AppStorage(Pref.theme) private var theme = NotchTheme.glass.rawValue
     @AppStorage(Pref.glassCardOpacity) private var glassCardOpacity = 0.07
     @AppStorage(Pref.glassCardBorderOpacity) private var glassCardBorderOpacity = 0.15
     @AppStorage(Pref.glassCardBlur) private var glassCardBlur = false
+    @AppStorage(Pref.musicAmbient) private var musicAmbient = true
+    @AppStorage(Pref.musicAmbientIntensity) private var musicAmbientIntensity = 0.75
 
     private var isGlass: Bool { theme == NotchTheme.glass.rawValue }
     private var fillOpacity: Double { isGlass ? glassCardOpacity : 0.045 }
     private var borderOpacity: Double { isGlass ? glassCardBorderOpacity : 0.07 }
+    private var palette: NowPlaying.Palette? { musicAmbient ? music.activePalette : nil }
+    private var ambientStrength: Double { musicAmbientIntensity * (music.playing ? 1.0 : 0.6) }
 
     func body(content: Content) -> some View {
         let rect = RoundedRectangle(cornerRadius: radius, style: .continuous)
@@ -247,21 +276,58 @@ private struct NotchCardBackground: ViewModifier {
                         rect.fill(.ultraThinMaterial)
                     }
                     rect.fill(.white.opacity(fillOpacity))
+                    if let palette {
+                        rect.fill(
+                            LinearGradient(
+                                colors: [
+                                    palette.primaryColor.opacity(0.11 * ambientStrength),
+                                    palette.secondaryColor.opacity(0.07 * ambientStrength)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                    }
                 }
             }
             .clipShape(rect)
-            .overlay(rect.strokeBorder(.white.opacity(borderOpacity)))
+            .overlay {
+                if let palette {
+                    rect.strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                palette.primaryColor.opacity(min(0.65, borderOpacity + 0.22 * ambientStrength)),
+                                palette.secondaryColor.opacity(min(0.55, borderOpacity + 0.14 * ambientStrength))
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+                } else {
+                    rect.strokeBorder(.white.opacity(borderOpacity))
+                }
+            }
     }
 }
 
 private struct HoverHighlight: ViewModifier {
     let radius: CGFloat
+    @ObservedObject private var music = NowPlaying.shared
+    @AppStorage(Pref.musicAmbient) private var musicAmbient = true
     @State private var hovering = false
+
+    private var tint: Color {
+        if musicAmbient, let p = music.activePalette {
+            return p.primaryColor
+        }
+        return .primary
+    }
 
     func body(content: Content) -> some View {
         content
             .background(RoundedRectangle(cornerRadius: radius, style: .continuous)
-                .fill(.primary.opacity(hovering ? 0.08 : 0)))
+                .fill(tint.opacity(hovering ? (musicAmbient && music.hasTrack ? 0.16 : 0.08) : 0)))
             .onHover { hovering = $0 }
             .animation(.easeOut(duration: 0.12), value: hovering)
     }

@@ -41,6 +41,8 @@ enum Pref {
     static let glassCardBorderOpacity = "glassCardBorderOpacity"
     static let glassCardBlur = "glassCardBlur"
     static let glassClosed = "glassClosed"
+    static let musicAmbient = "musicAmbient"
+    static let musicAmbientIntensity = "musicAmbientIntensity"
 
     static func register() {
         UserDefaults.standard.register(defaults: [
@@ -64,6 +66,8 @@ enum Pref {
             glassCardBorderOpacity: 0.15,
             glassCardBlur: false,
             glassClosed: false,
+            musicAmbient: true,
+            musicAmbientIntensity: 0.75,
         ])
     }
 }
@@ -175,6 +179,8 @@ struct NotchSettingsView: View {
     @AppStorage(Pref.glassCardBorderOpacity) private var glassCardBorderOpacity = 0.15
     @AppStorage(Pref.glassCardBlur) private var glassCardBlur = false
     @AppStorage(Pref.glassClosed) private var glassClosed = false
+    @AppStorage(Pref.musicAmbient) private var musicAmbient = true
+    @AppStorage(Pref.musicAmbientIntensity) private var musicAmbientIntensity = 0.75
     @State private var pinNotchPreview = false
 
     /// The notch always keeps at least one tab, so the last one left on can't be turned off.
@@ -259,6 +265,15 @@ struct NotchSettingsView: View {
 
                     Toggle("Keep notch open to preview live", isOn: $pinNotchPreview)
                     Text("Keeps the notch expanded at the top of your screen while you adjust sliders below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+
+                Section("Music Ambient") {
+                    Toggle("Music changes bar ambient atmosphere", isOn: $musicAmbient)
+                    if musicAmbient {
+                        sliderRow("Ambient intensity", value: $musicAmbientIntensity, range: 0.1...1.0, step: 0.05)
+                    }
+                    Text("Diffuses album artwork, multi-color aurora glow, rim lighting, and UI accents across the notch when a track is loaded (with breathing motion while playing).")
                         .font(.caption).foregroundStyle(.secondary)
                 }
 

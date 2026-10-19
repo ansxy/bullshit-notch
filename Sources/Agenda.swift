@@ -14,28 +14,102 @@ final class Agenda: ObservableObject {
 
     private let store = EKEventStore()
     private var started = false
+    private var lastKnownToday = Calendar.current.startOfDay(for: .now)
 
     private init() {}
 
-    /// Asks for access the first time the agenda is shown, not at launch.
+    /// Asks for access the first time the agenda is shown, and refreshes every subsequent time it appears.
     func start() {
-        guard !started else { return }
+        if started {
+            checkAuthorizationAndReload(resetCache: true)
+            return
+        }
         started = true
+        requestAccessIfNeeded()
+
+        NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                Agenda.shared.store.reset()
+                Agenda.shared.reload()
+            }
+        }
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated {
+                Agenda.shared.checkAuthorizationAndReload(resetCache: true)
+            }
+        }
+        if meetingTimer == nil {
+            meetingTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+                Task { @MainActor in
+                    Agenda.shared.checkAuthorizationAndReload(resetCache: true)
+                }
+            }
+        }
+    }
+
+    private func requestAccessIfNeeded() {
         store.requestFullAccessToEvents { granted, _ in
-            DispatchQueue.main.async { self.calendarAccess = granted; self.reload() }
+            DispatchQueue.main.async {
+                self.calendarAccess = granted
+                if granted {
+                    self.store.reset()
+                    self.store.refreshSourcesIfNecessary()
+                }
+                self.reload()
+            }
         }
         store.requestFullAccessToReminders { granted, _ in
-            DispatchQueue.main.async { self.remindersAccess = granted; self.reload() }
+            DispatchQueue.main.async {
+                self.remindersAccess = granted
+                if granted {
+                    self.store.reset()
+                    self.store.refreshSourcesIfNecessary()
+                }
+                self.reload()
+            }
         }
-        NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: store, queue: .main) { _ in
-            MainActor.assumeIsolated { Agenda.shared.reload() }
+    }
+
+    /// Re-checks TCC status (in case permissions were toggled in System Settings), resets stale EventKit caches,
+    /// rolls the selected day forward across midnight, and reloads events + reminders.
+    func checkAuthorizationAndReload(resetCache: Bool = false) {
+        let evStatus = EKEventStore.authorizationStatus(for: .event)
+        let remStatus = EKEventStore.authorizationStatus(for: .reminder)
+        let newCalAccess = (evStatus == .fullAccess)
+        let newRemAccess = (remStatus == .fullAccess)
+
+        if !calendarAccess && newCalAccess || !remindersAccess && newRemAccess {
+            calendarAccess = newCalAccess
+            remindersAccess = newRemAccess
+            store.reset()
+            store.refreshSourcesIfNecessary()
+        } else {
+            calendarAccess = newCalAccess
+            remindersAccess = newRemAccess
+            if resetCache && (calendarAccess || remindersAccess) {
+                store.reset()
+                store.refreshSourcesIfNecessary()
+            }
         }
+
+        let currentToday = Calendar.current.startOfDay(for: .now)
+        if currentToday != lastKnownToday {
+            if day == lastKnownToday {
+                lastKnownToday = currentToday
+                day = currentToday
+                return
+            }
+            lastKnownToday = currentToday
+        }
+
+        reload()
     }
 
     func reload() {
         guard let end = Calendar.current.date(byAdding: .day, value: 1, to: day) else { return }
         if calendarAccess {
             events = store.events(matching: store.predicateForEvents(withStart: day, end: end, calendars: nil))
+                .filter { $0.status != .canceled }
                 .sorted { $0.startDate < $1.startDate }
             reloadNextMeeting()
         }
@@ -63,7 +137,7 @@ final class Agenda: ObservableObject {
     @Published private(set) var nextMeetingLink: URL?
     private var meetingTimer: Timer?
 
-    /// Recomputed on every reload and once a minute, so it moves on when a meeting ends.
+    /// Recomputed on every reload and periodically, so it moves on when a meeting ends or a new one appears.
     func reloadNextMeeting() {
         guard calendarAccess, let end = Calendar.current.date(byAdding: .day, value: 7, to: .now) else { return }
         let now = Date.now
@@ -75,11 +149,6 @@ final class Agenda: ObservableObject {
         let event = withLink ?? upcoming.first
         nextMeeting = event
         nextMeetingLink = event.flatMap(Self.meetingLink(for:))
-        if meetingTimer == nil {
-            meetingTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
-                Task { @MainActor in Agenda.shared.reloadNextMeeting() }
-            }
-        }
     }
 
     /// ponytail: known call hosts only, so a random link in the notes isn't mistaken for the meeting.

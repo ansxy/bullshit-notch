@@ -211,8 +211,11 @@ private struct NotchView: View {
     @AppStorage(Pref.glassShadowOpacity) private var glassShadowOpacity = 0.40
     @AppStorage(Pref.glassAccentGlow) private var glassAccentGlow = 0.18
     @AppStorage(Pref.glassClosed) private var glassClosed = false
+    @AppStorage(Pref.musicAmbient) private var musicAmbient = true
+    @AppStorage(Pref.musicAmbientIntensity) private var musicAmbientIntensity = 0.75
 
     @State private var dropTargeted = false
+    @State private var breathe = false
     @Namespace private var tabHighlight
 
     private var isGlass: Bool {
@@ -221,6 +224,17 @@ private struct NotchView: View {
 
     private var currentMaterial: Material {
         (GlassMaterial(rawValue: glassMaterial) ?? .ultraThin).swiftUIMaterial
+    }
+
+    /// Active vibrant palette when music ambient is enabled and a track is loaded (playing or paused).
+    private var musicPalette: NowPlaying.Palette? {
+        musicAmbient ? music.activePalette : nil
+    }
+
+    /// Effective strength of the music ambient effect (full while playing, softly blended while paused).
+    private var ambientLevel: Double {
+        guard musicPalette != nil else { return 0 }
+        return musicAmbientIntensity * (music.playing ? 1.0 : 0.58)
     }
 
     /// Tabs switched on in Settings (never empty: Settings keeps at least one on).
@@ -325,9 +339,22 @@ private struct NotchView: View {
         .environment(\.controlActiveState, .key)
         .animation(.spring(response: 0.38, dampingFraction: 0.78), value: wing)
         .animation(.spring(response: 0.38, dampingFraction: 0.78), value: activity)
+        .animation(.easeInOut(duration: 0.55), value: music.palette)
+        .task(id: music.playing) {
+            if music.playing {
+                breathe = false
+                withAnimation(.easeInOut(duration: 3.1).repeatForever(autoreverses: true)) {
+                    breathe = true
+                }
+            } else {
+                withAnimation(.easeOut(duration: 0.6)) {
+                    breathe = false
+                }
+            }
+        }
     }
 
-    /// Surface background: either the classic Dark notch or the tunable Glass material stack.
+    /// Surface background: outside/closed notch follows Settings; inside (expanded) infuses the music ambient aurora.
     private var surface: some View {
         ZStack {
             if isGlass {
@@ -335,6 +362,27 @@ private struct NotchView: View {
                     .fill(currentMaterial)
                     .opacity(glassBlurOpacity)
                 Color.black.opacity(glassTintOpacity)
+            } else {
+                Color.black
+                if model.expanded {
+                    LinearGradient(colors: [.black, Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
+                }
+            }
+
+            if model.expanded {
+                if let palette = musicPalette {
+                    expandedMusicAmbient(palette: palette)
+                } else if let accent {
+                    RadialGradient(
+                        colors: [accent.opacity(isGlass ? glassAccentGlow : 0.08), .clear],
+                        center: .bottom,
+                        startRadius: 0,
+                        endRadius: isGlass ? 300 : 280
+                    )
+                }
+            }
+
+            if isGlass {
                 if glassSheen > 0 {
                     LinearGradient(
                         colors: [.white.opacity(glassSheen), .clear, .white.opacity(glassSheen * 0.4)],
@@ -349,23 +397,59 @@ private struct NotchView: View {
                         endPoint: UnitPoint(x: 0.5, y: model.expanded ? 0.38 : 1.0)
                     )
                 }
-                if model.expanded, let accent, glassAccentGlow > 0 {
-                    RadialGradient(
-                        colors: [accent.opacity(glassAccentGlow), .clear],
-                        center: .bottom,
-                        startRadius: 0,
-                        endRadius: 300
-                    )
-                }
-            } else {
-                Color.black
-                if model.expanded {
-                    LinearGradient(colors: [.black, Color(white: 0.08)], startPoint: .top, endPoint: .bottom)
-                    if let accent {
-                        RadialGradient(colors: [accent.opacity(0.08), .clear], center: .bottom, startRadius: 0, endRadius: 280)
-                    }
+            } else if model.expanded && musicPalette != nil {
+                LinearGradient(
+                    colors: [.black.opacity(0.82), .clear],
+                    startPoint: .top,
+                    endPoint: UnitPoint(x: 0.5, y: 0.32)
+                )
+            }
+        }
+    }
+
+    /// Expanded bar ambient: diffused album cover + three-color breathing aurora mesh inside the open panel.
+    @ViewBuilder
+    private func expandedMusicAmbient(palette: NowPlaying.Palette) -> some View {
+        ZStack {
+            if let art = music.artwork {
+                GeometryReader { geo in
+                    Image(nsImage: art)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .scaleEffect(breathe ? 1.24 : 1.06)
+                        .offset(x: breathe ? 14 : -14, y: breathe ? -6 : 6)
+                        .blur(radius: 36)
+                        .opacity((isGlass ? 0.40 : 0.32) * ambientLevel)
                 }
             }
+            RadialGradient(
+                colors: [
+                    palette.primaryColor.opacity((isGlass ? 0.46 : 0.34) * ambientLevel),
+                    .clear
+                ],
+                center: breathe ? UnitPoint(x: 0.22, y: 0.55) : UnitPoint(x: 0.14, y: 0.88),
+                startRadius: 4,
+                endRadius: breathe ? 340 : 270
+            )
+            RadialGradient(
+                colors: [
+                    palette.secondaryColor.opacity((isGlass ? 0.40 : 0.30) * ambientLevel),
+                    .clear
+                ],
+                center: breathe ? UnitPoint(x: 0.78, y: 0.86) : UnitPoint(x: 0.86, y: 0.46),
+                startRadius: 4,
+                endRadius: breathe ? 320 : 260
+            )
+            RadialGradient(
+                colors: [
+                    palette.tertiaryColor.opacity((isGlass ? 0.32 : 0.24) * ambientLevel),
+                    .clear
+                ],
+                center: breathe ? UnitPoint(x: 0.52, y: 0.96) : UnitPoint(x: 0.48, y: 0.72),
+                startRadius: 0,
+                endRadius: 240
+            )
         }
     }
 
@@ -426,7 +510,7 @@ private struct NotchView: View {
         case .agents:
             Text("\(agents.busyCount)")
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(accent ?? .orange)
+                .foregroundStyle(Color(nsColor: agents.fire.accent))
         case .music:
             Visualizer(playing: music.playing).frame(width: 22, height: 14)
         case .none:
@@ -476,7 +560,25 @@ private struct NotchView: View {
                             .foregroundStyle(currentTab == tab ? .white : .white.opacity(0.55))
                             .background {
                                 if currentTab == tab {
-                                    Capsule().fill(.white.opacity(0.16)).matchedGeometryEffect(id: "tab", in: tabHighlight)
+                                    if let palette = musicPalette {
+                                        Capsule()
+                                            .fill(
+                                                LinearGradient(
+                                                    colors: [
+                                                        palette.primaryColor.opacity(0.42),
+                                                        palette.secondaryColor.opacity(0.34)
+                                                    ],
+                                                    startPoint: .topLeading,
+                                                    endPoint: .bottomTrailing
+                                                )
+                                            )
+                                            .overlay(
+                                                Capsule().strokeBorder(palette.primaryColor.opacity(0.55), lineWidth: 0.8)
+                                            )
+                                            .matchedGeometryEffect(id: "tab", in: tabHighlight)
+                                    } else {
+                                        Capsule().fill(.white.opacity(0.16)).matchedGeometryEffect(id: "tab", in: tabHighlight)
+                                    }
                                 }
                             }
                             .contentShape(Capsule())
@@ -524,6 +626,11 @@ private struct HomeView: View {
 /// Album cover fills the card; title, progress and controls sit on a dark fade at the bottom.
 private struct MusicCard: View {
     @ObservedObject private var music = NowPlaying.shared
+    @AppStorage(Pref.musicAmbient) private var musicAmbient = true
+
+    private var palette: NowPlaying.Palette? {
+        musicAmbient ? music.activePalette : nil
+    }
 
     var body: some View {
         if music.player == nil {
@@ -540,22 +647,54 @@ private struct MusicCard: View {
         } else {
             let rect = RoundedRectangle(cornerRadius: 14, style: .continuous)
             VStack(spacing: 4) {
-                // Empty top area: clicking the cover opens the player.
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { music.openPlayer() }
-                    .help("Click to open \(music.player?.rawValue ?? "player")")
+                // Top area: mini equalizer badge in corner; clicking opens the player.
+                HStack {
+                    Spacer()
+                    if music.playing {
+                        Visualizer(playing: true, palette: palette)
+                            .frame(width: 18, height: 11)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 3)
+                            .background(.black.opacity(0.45), in: Capsule())
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .contentShape(Rectangle())
+                .onTapGesture { music.openPlayer() }
+                .help("Click to open \(music.player?.rawValue ?? "player")")
+
                 VStack(spacing: 0) {
                     Text(music.title).font(.callout.weight(.semibold)).lineLimit(1)
-                    Text(music.artist).font(.caption).foregroundStyle(.white.opacity(0.7)).lineLimit(1)
+                    Text(music.artist)
+                        .font(.caption)
+                        .foregroundStyle(palette?.primaryColor.opacity(0.95) ?? .white.opacity(0.7))
+                        .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
                 .onTapGesture { music.openPlayer() }
                 progress
-                HStack(spacing: 24) {
+                HStack(spacing: 20) {
                     control("backward.fill", .previous)
-                    control(music.playing ? "pause.fill" : "play.fill", .playPause).font(.title3)
+                    Button { music.send(.playPause) } label: {
+                        Image(systemName: music.playing ? "pause.fill" : "play.fill")
+                            .font(.callout.weight(.bold))
+                            .frame(width: 26, height: 26)
+                            .background {
+                                if let palette {
+                                    Circle().fill(
+                                        LinearGradient(
+                                            colors: [palette.primaryColor.opacity(0.55), palette.secondaryColor.opacity(0.45)],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+                                } else {
+                                    Circle().fill(.white.opacity(0.18))
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
                     control("forward.fill", .next)
                 }
                 .frame(maxWidth: .infinity)
@@ -567,16 +706,35 @@ private struct MusicCard: View {
                 ZStack {
                     if let art = music.artwork {
                         Image(nsImage: art).resizable().aspectRatio(contentMode: .fill)
+                    } else if let palette {
+                        LinearGradient(
+                            colors: [palette.primaryColor.opacity(0.45), palette.secondaryColor.opacity(0.35), .black],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                        Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.white.opacity(0.5))
                     } else {
                         Color.white.opacity(0.08)
                         Image(systemName: "music.note").font(.system(size: 40)).foregroundStyle(.secondary)
                     }
-                    LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.55), .black.opacity(0.85)],
+                    LinearGradient(colors: [.black.opacity(0.05), .black.opacity(0.55), .black.opacity(0.88)],
                                    startPoint: .top, endPoint: .bottom)
                 }
             }
             .clipShape(rect)
-            .overlay(rect.strokeBorder(.white.opacity(0.1)))
+            .overlay(
+                rect.strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            (palette?.primaryColor ?? .white).opacity(palette != nil ? 0.45 : 0.1),
+                            (palette?.secondaryColor ?? .white).opacity(palette != nil ? 0.28 : 0.1)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+            )
         }
     }
 
@@ -586,7 +744,7 @@ private struct MusicCard: View {
             let elapsed = music.elapsed(at: context.date)
             VStack(spacing: 2) {
                 GeometryReader { geo in
-                    LevelBar(value: music.duration > 0 ? elapsed / music.duration : 0)
+                    LevelBar(value: music.duration > 0 ? elapsed / music.duration : 0, palette: palette)
                         .contentShape(Rectangle())
                         .onTapGesture { point in
                             music.seek(to: max(0, min(1, point.x / geo.size.width)) * music.duration)
@@ -616,7 +774,13 @@ private struct MusicCard: View {
 
 private struct AgendaCard: View {
     @ObservedObject private var agenda = Agenda.shared
-    private let today = Calendar.current.startOfDay(for: .now)
+    @ObservedObject private var music = NowPlaying.shared
+    @AppStorage(Pref.musicAmbient) private var musicAmbient = true
+    private var today: Date { Calendar.current.startOfDay(for: .now) }
+
+    private var palette: NowPlaying.Palette? {
+        musicAmbient ? music.activePalette : nil
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -629,7 +793,7 @@ private struct AgendaCard: View {
                     } else if agenda.events.isEmpty && agenda.reminders.isEmpty {
                         Text("Nothing scheduled").foregroundStyle(.secondary)
                     }
-                    ForEach(agenda.events, id: \.self) { event in
+                    ForEach(Array(agenda.events.enumerated()), id: \.offset) { _, event in
                         HStack(spacing: 6) {
                             Capsule().fill(Color(nsColor: event.calendar.color)).frame(width: 3, height: 14)
                             Text(event.title).lineLimit(1)
@@ -637,18 +801,20 @@ private struct AgendaCard: View {
                             Text(event.isAllDay ? "all-day" : event.startDate.formatted(date: .omitted, time: .shortened))
                                 .foregroundStyle(.secondary)
                         }
+                        .id("\(event.calendarItemIdentifier)|\(event.startDate.timeIntervalSince1970)|\(event.title ?? "")")
                         .contentShape(Rectangle())
                         .hoverHighlight(radius: 5)
                         .onTapGesture { Agenda.open(event) }
                         .help("Open in Calendar")
                     }
-                    ForEach(agenda.reminders, id: \.self) { reminder in
+                    ForEach(Array(agenda.reminders.enumerated()), id: \.offset) { _, reminder in
                         HStack(spacing: 6) {
                             Button { agenda.complete(reminder) } label: { Image(systemName: "circle") }
                                 .buttonStyle(.plain)
                                 .help("Mark as done")
                             Text(reminder.title ?? "").lineLimit(1)
                         }
+                        .id("\(reminder.calendarItemIdentifier)|\(reminder.title ?? "")")
                     }
                 }
                 .font(.caption)
@@ -677,7 +843,7 @@ private struct AgendaCard: View {
                     .font(.caption.bold())
                     .padding(.horizontal, 8)
                     .padding(.vertical, 2)
-                    .background((live ? Color.green : Color.accentColor).opacity(0.8), in: Capsule())
+                    .background((live ? Color.green : (palette?.primaryColor ?? Color.accentColor)).opacity(0.8), in: Capsule())
                     .help(link.absoluteString)
             }
         }
@@ -709,12 +875,40 @@ private struct AgendaCard: View {
                     }
                     .frame(maxWidth: .infinity)
                     .frame(height: 30)
-                    .background(selected ? Color.accentColor.opacity(0.8) : .white.opacity(0.04),
-                                in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background {
+                        let shape = RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        if selected {
+                            if let palette {
+                                shape.fill(
+                                    LinearGradient(
+                                        colors: [palette.primaryColor.opacity(0.72), palette.secondaryColor.opacity(0.58)],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                            } else {
+                                shape.fill(Color.accentColor.opacity(0.8))
+                            }
+                        } else {
+                            shape.fill(.white.opacity(0.04))
+                        }
+                    }
                     .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }
+            Button {
+                agenda.checkAuthorizationAndReload(resetCache: true)
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 30)
+                    .background(.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help("Refresh calendar and reminders")
         }
         .frame(maxWidth: .infinity)
     }
@@ -811,37 +1005,54 @@ private struct ArtworkView: View {
     let image: NSImage?
     let size: CGFloat
     let radius: CGFloat
+    var palette: NowPlaying.Palette? = nil
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
         Group {
             if let image {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
             } else {
                 Image(systemName: "music.note")
                     .font(.system(size: size * 0.4))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(palette?.primaryColor ?? .secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.white.opacity(0.1))
+                    .background((palette?.primaryColor ?? Color.white).opacity(0.15))
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: radius))
+        .clipShape(shape)
+        .overlay {
+            if let palette {
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [palette.primaryColor.opacity(0.8), palette.secondaryColor.opacity(0.6)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+            }
+        }
+        .shadow(color: (palette?.primaryColor ?? .clear).opacity(0.45), radius: 4)
     }
 }
 
 /// ponytail: decorative bars, not a real spectrum — apps can't tap system audio without a capture permission.
 private struct Visualizer: View {
     let playing: Bool
+    var palette: NowPlaying.Palette? = nil
     @State private var heights: [CGFloat] = [5, 10, 6, 9]
 
     var body: some View {
         HStack(spacing: 2) {
             ForEach(0..<4, id: \.self) { i in
                 Capsule()
-                    .fill(.white)
+                    .fill(barFill(index: i))
                     .frame(width: 3, height: playing ? heights[i] : 3)
             }
         }
+        .shadow(color: (palette?.primaryColor ?? .clear).opacity(playing ? 0.5 : 0), radius: 3)
         .task(id: playing) {
             guard playing else { return }
             while !Task.isCancelled {
@@ -852,17 +1063,42 @@ private struct Visualizer: View {
             }
         }
     }
+
+    private func barFill(index: Int) -> AnyShapeStyle {
+        if let palette {
+            let top = index % 2 == 0 ? palette.primaryColor : palette.secondaryColor
+            let bottom = index % 2 == 0 ? palette.secondaryColor : palette.tertiaryColor
+            return AnyShapeStyle(LinearGradient(colors: [top, bottom], startPoint: .top, endPoint: .bottom))
+        }
+        return AnyShapeStyle(Color.white)
+    }
 }
 
 private struct LevelBar: View {
     let value: Double  // 0...1
+    var palette: NowPlaying.Palette? = nil
 
     var body: some View {
         GeometryReader { geo in
             Capsule()
                 .fill(.white.opacity(0.2))
                 .overlay(alignment: .leading) {
-                    Capsule().fill(.white).frame(width: geo.size.width * max(0, min(1, value)))
+                    if let palette {
+                        Capsule()
+                            .fill(
+                                LinearGradient(
+                                    colors: [palette.primaryColor, palette.secondaryColor],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .frame(width: geo.size.width * max(0, min(1, value)))
+                            .shadow(color: palette.primaryColor.opacity(0.6), radius: 3)
+                    } else {
+                        Capsule()
+                            .fill(.white)
+                            .frame(width: geo.size.width * max(0, min(1, value)))
+                    }
                 }
         }
     }
