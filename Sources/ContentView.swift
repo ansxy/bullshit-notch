@@ -74,6 +74,8 @@ struct ContentView: View {
             ContainersView()
         case .builtin(.agents):
             AgentsView()
+        case .builtin(.qa):
+            QARecorderView()
         case .custom(let id):
             CustomSectionView(sectionID: id)
         }

@@ -21,6 +21,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case work = "Work"
     case containers = "Containers"
     case agents = "Agents"
+    case qa = "QA"
 
     var id: String { rawValue }
     var icon: String {
@@ -29,6 +30,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .work:       return "folder"
         case .containers: return "shippingbox.fill"
         case .agents:     return "sparkles"
+        case .qa:         return "record.circle"
         }
     }
 }

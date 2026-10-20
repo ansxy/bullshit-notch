@@ -23,6 +23,7 @@ enum Pref {
     static let sectionWork = "showSectionWork"
     static let sectionContainers = "showSectionContainers"
     static let sectionAgents = "showSectionAgents"
+    static let sectionQA = "showSectionQA"
     // Agent limits.
     static let claudeDailyLimit = "claudeDailyLimit"
     static let claudeWeeklyLimit = "claudeWeeklyLimit"
@@ -56,7 +57,7 @@ enum Pref {
             agenda: true, mirror: true, replaceHUD: false, widthAdjust: 0.0, heightAdjust: 0.0,
             idleWidth: 48.0,
             tabHome: true, tabShelf: true, tabTopbar: true, music: true, airDrop: true,
-            sectionGit: true, sectionWork: true, sectionContainers: true, sectionAgents: true,
+            sectionGit: true, sectionWork: true, sectionContainers: true, sectionAgents: true, sectionQA: true,
             claudeDailyLimit: 12_500_000, claudeWeeklyLimit: 90_000_000,
             agyDailyLimit: 8_000_000, agyWeeklyLimit: 50_000_000,
             theme: NotchTheme.glass.rawValue,
@@ -202,6 +203,7 @@ struct NotchSettingsView: View {
     @AppStorage(Pref.sectionWork) private var sectionWork = true
     @AppStorage(Pref.sectionContainers) private var sectionContainers = true
     @AppStorage(Pref.sectionAgents) private var sectionAgents = true
+    @AppStorage(Pref.sectionQA) private var sectionQA = true
 
     // Theme & Glass settings
     @AppStorage(Pref.theme) private var theme = NotchTheme.glass.rawValue
@@ -407,11 +409,12 @@ struct NotchSettingsView: View {
                 }
                 .disabled(!tabShelf)
 
-                Section("Git, Work, Containers & Agents Items") {
+                Section("Git, Work, Containers, Agents & QA Items") {
                     Toggle("Git (pull requests)", isOn: $sectionGit)
                     Toggle("Work (project runner)", isOn: $sectionWork)
                     Toggle("Containers (Docker / OrbStack / Podman)", isOn: $sectionContainers)
                     Toggle("Agents", isOn: $sectionAgents)
+                    Toggle("QA Recorder (screen + Firefox logs/fetch)", isOn: $sectionQA)
                 }
                 .disabled(!tabTopbar)
 
