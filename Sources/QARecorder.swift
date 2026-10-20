@@ -812,7 +812,7 @@ final class QAFloatingPillController {
     func show() {
         if panel == nil {
             let p = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 320, height: 42),
+                contentRect: NSRect(x: 0, y: 0, width: 380, height: 50),
                 styleMask: [.borderless, .nonactivatingPanel],
                 backing: .buffered,
                 defer: false
@@ -826,7 +826,7 @@ final class QAFloatingPillController {
             p.contentView = NSHostingView(rootView: QAFloatingPillView())
             if let screen = NSScreen.main {
                 let frame = screen.visibleFrame
-                p.setFrameOrigin(NSPoint(x: frame.midX - 160, y: frame.minY + 36))
+                p.setFrameOrigin(NSPoint(x: frame.midX - 190, y: frame.minY + 40))
             }
             panel = p
         }
@@ -848,42 +848,43 @@ private struct QAFloatingPillView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 12) {
             // Recording pulse + timer
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 Circle()
                     .fill(store.isPaused ? Color.yellow : Color.red)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 9, height: 9)
+                    .shadow(color: store.isPaused ? Color.yellow.opacity(0.8) : Color.red.opacity(0.8), radius: 3)
                 Text(formattedElapsed)
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundStyle(.white)
             }
 
-            Divider().frame(height: 16)
+            Divider().frame(height: 18)
 
             // Firefox / Browser live badge
-            HStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Image(systemName: "flame.fill")
-                    .font(.system(size: 10))
+                    .font(.system(size: 11))
                     .foregroundStyle(.orange)
                 Text("\(store.liveErrorCount) err · \(store.liveFetchCount) req")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 12, weight: .semibold, design: .monospaced))
                     .foregroundStyle(store.liveErrorCount > 0 ? Color.orange : Color.secondary)
             }
-            .padding(.horizontal, 7)
-            .padding(.vertical, 3)
-            .background(Color.orange.opacity(0.14), in: Capsule())
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Color.orange.opacity(0.18), in: Capsule())
 
-            Divider().frame(height: 16)
+            Divider().frame(height: 18)
 
             // Pause / Resume
             Button {
                 store.togglePause()
             } label: {
                 Image(systemName: store.isPaused ? "play.fill" : "pause.fill")
-                    .font(.system(size: 11, weight: .bold))
-                    .frame(width: 24, height: 24)
-                    .background(.white.opacity(0.12), in: Circle())
+                    .font(.system(size: 12, weight: .bold))
+                    .frame(width: 28, height: 28)
+                    .background(.white.opacity(0.14), in: Circle())
             }
             .buttonStyle(.plain)
             .help(store.isPaused ? "Resume QA recording" : "Pause QA recording")
@@ -892,15 +893,15 @@ private struct QAFloatingPillView: View {
             Button {
                 store.flagMoment()
             } label: {
-                HStack(spacing: 3) {
+                HStack(spacing: 4) {
                     Image(systemName: "camera.fill")
-                        .font(.system(size: 10))
+                        .font(.system(size: 11))
                     Text("Flag")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                 }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(.white.opacity(0.12), in: Capsule())
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(.white.opacity(0.14), in: Capsule())
             }
             .buttonStyle(.plain)
             .help("Snap a keyframe screenshot and mark a bug in the timeline")
@@ -909,31 +910,33 @@ private struct QAFloatingPillView: View {
             Button {
                 store.stopRecording()
             } label: {
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Image(systemName: "stop.fill")
-                        .font(.system(size: 9))
+                        .font(.system(size: 10))
                     Text("Stop")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 12, weight: .bold))
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
                 .background(Color.red, in: Capsule())
                 .foregroundStyle(.white)
+                .shadow(color: Color.red.opacity(0.4), radius: 4)
             }
             .buttonStyle(.plain)
             .help("Finish recording and open QA Summary in the Notch")
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 7)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
         .background(
             Capsule()
                 .fill(.ultraThinMaterial)
-                .overlay(Capsule().fill(Color.black.opacity(0.65)))
+                .overlay(Capsule().fill(Color.black.opacity(0.70)))
         )
         .overlay(
             Capsule()
-                .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
         )
+        .shadow(color: Color.black.opacity(0.45), radius: 10, y: 4)
         .environment(\.colorScheme, .dark)
     }
 }
