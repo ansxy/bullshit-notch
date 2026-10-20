@@ -839,35 +839,7 @@ private struct NotchView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Color.clear.frame(width: model.notch.width)
-            HStack(spacing: 10) {
-                Button {
-                    if qa.isRecording {
-                        qa.stopRecording()
-                    } else {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                            model.tab = .topbar
-                        }
-                        DispatchQueue.main.async {
-                            NotificationCenter.default.post(name: Notification.Name("DemoSwitchSection"), object: AppSection.qa)
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(qa.isRecording ? Color.white : Color.red)
-                            .frame(width: 6, height: 6)
-                        Text(qa.isRecording ? "STOP" : "REC")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(qa.isRecording ? Color.red : Color.red.opacity(0.22), in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.red.opacity(0.55), lineWidth: 0.8))
-                    .foregroundStyle(.white)
-                }
-                .buttonStyle(.plain)
-                .help(qa.isRecording ? "Stop QA recording" : "Open QA Session Recorder")
-
+            HStack(spacing: 12) {
                 if battery.hasBattery { BatteryLabel(battery: battery) }
                 Button { NotchSettingsWindow.show() } label: { Image(systemName: "gearshape.fill") }
                     .buttonStyle(.plain)
