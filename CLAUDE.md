@@ -45,6 +45,7 @@ TopBar is a macOS (14+) menu-bar-less app that turns the MacBook camera notch in
 
 ## Conventions
 
+- **Git & Branching**: Never commit directly to `main` or `master`. Always create a new branch for every feature or fix (e.g. `feat/<name>`, `fix/<name>`, `perf/<name>`), push it to origin, and open a Pull Request.
 - `// ponytail:` comments mark deliberate shortcuts and name their limits or upgrade paths (e.g. single-screen setup at launch, decorative visualizer). Keep that style when taking a shortcut.
 - The notch can't host sheets or alerts, so text input is inline (`TextField` rows). `KeyablePanel` exists so those fields can become key.
 - Prefer adding a feature as its own `Sources/<Feature>.swift` with a `shared` store, and wire it into `NotchView`.
