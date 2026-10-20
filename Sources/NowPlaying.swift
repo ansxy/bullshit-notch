@@ -321,26 +321,53 @@ final class NowPlaying: ObservableObject {
     }
 
     /// Spotify hands out an artwork URL; Music only gives raw image data, which we write to a temp file.
+    /// Downscales decoded artwork to at most 240x240 so high-res covers don't waste megabytes of RAM.
     nonisolated private static func fetchArtwork(_ player: Player, url: String) -> NSImage? {
+        let rawImage: NSImage?
         if player == .spotify {
-            return URL(string: url).flatMap { try? Data(contentsOf: $0) }.flatMap(NSImage.init(data:))
+            rawImage = URL(string: url).flatMap { try? Data(contentsOf: $0) }.flatMap(NSImage.init(data:))
+        } else {
+            let path = NSTemporaryDirectory() + "bullshitnotch-artwork"
+            let script = """
+            tell application "Music"
+                try
+                    set d to raw data of artwork 1 of current track
+                on error
+                    return ""
+                end try
+            end tell
+            set f to open for access (POSIX file "\(path)") with write permission
+            set eof f to 0
+            write d to f
+            close access f
+            return "ok"
+            """
+            guard shell("/usr/bin/osascript", ["-e", script]).contains("ok") else { return nil }
+            rawImage = NSImage(contentsOfFile: path)
+            try? FileManager.default.removeItem(atPath: path)
         }
-        let path = NSTemporaryDirectory() + "bullshitnotch-artwork"
-        let script = """
-        tell application "Music"
-            try
-                set d to raw data of artwork 1 of current track
-            on error
-                return ""
-            end try
-        end tell
-        set f to open for access (POSIX file "\(path)") with write permission
-        set eof f to 0
-        write d to f
-        close access f
-        return "ok"
-        """
-        guard shell("/usr/bin/osascript", ["-e", script]).contains("ok") else { return nil }
-        return NSImage(contentsOfFile: path)
+        guard let rawImage else { return nil }
+        return downscale(rawImage, maxDimension: 240)
+    }
+
+    nonisolated private static func downscale(_ image: NSImage, maxDimension: CGFloat) -> NSImage {
+        let size = image.size
+        guard size.width > maxDimension || size.height > maxDimension else { return image }
+        let scale = min(maxDimension / max(1, size.width), maxDimension / max(1, size.height))
+        let targetW = max(1, Int((size.width * scale).rounded()))
+        let targetH = max(1, Int((size.height * scale).rounded()))
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: targetW, pixelsHigh: targetH,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: targetW * 4, bitsPerPixel: 32
+        ) else { return image }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        NSGraphicsContext.current?.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: targetW, height: targetH))
+        NSGraphicsContext.restoreGraphicsState()
+        let small = NSImage(size: NSSize(width: targetW, height: targetH))
+        small.addRepresentation(rep)
+        return small
     }
 }

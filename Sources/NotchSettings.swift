@@ -542,6 +542,7 @@ struct NotchSettingsView: View {
 @MainActor
 enum NotchSettingsWindow {
     static var window: NSWindow?
+    private static var closeObserver: NSObjectProtocol?
 
     static func show() {
         if window == nil {
@@ -558,8 +559,16 @@ enum NotchSettingsWindow {
             } else {
                 w.center()
             }
-            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
-                MainActor.assumeIsolated { NotchModel.shared?.pinnedPreview = false }
+            closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+                MainActor.assumeIsolated {
+                    NotchModel.shared?.pinnedPreview = false
+                    if let obs = closeObserver {
+                        NotificationCenter.default.removeObserver(obs)
+                        closeObserver = nil
+                    }
+                    window?.contentViewController = nil
+                    window = nil
+                }
             }
             window = w
         }

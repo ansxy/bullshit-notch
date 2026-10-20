@@ -1076,6 +1076,7 @@ private struct AgendaCard: View {
             if let meeting = agenda.nextMeeting { nextMeetingRow(meeting) }
         }
         .onAppear { agenda.start() }
+        .onDisappear { agenda.stop() }
     }
 
     /// "Next: Standup · 15:00   [Join]" — Join opens the call link, the rest opens the event.

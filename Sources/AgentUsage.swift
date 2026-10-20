@@ -80,6 +80,50 @@ extension Harness {
     }
 }
 
+struct UsageEntry {
+    let date: Date
+    let input: Int
+    let output: Int
+    let cacheWrite: Int
+    let cacheRead: Int
+}
+
+private actor UsageFileCache {
+    static let shared = UsageFileCache()
+
+    struct CachedFile {
+        var modDate: Date
+        var size: UInt64
+        var entries: [UsageEntry]
+    }
+
+    private var claudeFiles: [URL: CachedFile] = [:]
+    private var agyFiles: [URL: CachedFile] = [:]
+
+    func claudeEntries(for file: URL, modDate: Date, size: UInt64, builder: () -> [UsageEntry]) -> [UsageEntry] {
+        if let cached = claudeFiles[file], cached.modDate == modDate, cached.size == size {
+            return cached.entries
+        }
+        let entries = builder()
+        claudeFiles[file] = CachedFile(modDate: modDate, size: size, entries: entries)
+        return entries
+    }
+
+    func agyEntries(for file: URL, modDate: Date, size: UInt64, builder: () -> [UsageEntry]) -> [UsageEntry] {
+        if let cached = agyFiles[file], cached.modDate == modDate, cached.size == size {
+            return cached.entries
+        }
+        let entries = builder()
+        agyFiles[file] = CachedFile(modDate: modDate, size: size, entries: entries)
+        return entries
+    }
+
+    func prune(activeClaude: Set<URL>, activeAgy: Set<URL>) {
+        claudeFiles = claudeFiles.filter { activeClaude.contains($0.key) }
+        agyFiles = agyFiles.filter { activeAgy.contains($0.key) }
+    }
+}
+
 @MainActor
 final class AgentUsageTracker: ObservableObject {
     static let shared = AgentUsageTracker()
@@ -94,6 +138,7 @@ final class AgentUsageTracker: ObservableObject {
     private var cachedKeychainToken: String? = nil
     private var timer: Timer?
     private var isDemo = false
+    private var lastRefreshDate: Date = .distantPast
 
     init() {
         migrateLegacyLimitsIfNeeded()
@@ -101,10 +146,22 @@ final class AgentUsageTracker: ObservableObject {
             loadDemoData()
             return
         }
-        refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+    }
+
+    func startPolling() {
+        if isDemo { return }
+        if Date().timeIntervalSince(lastRefreshDate) > 15 {
+            refresh()
+        }
+        guard timer == nil else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 45, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
+    }
+
+    func stopPolling() {
+        timer?.invalidate()
+        timer = nil
     }
 
     func loadDemoData() {
@@ -162,15 +219,16 @@ final class AgentUsageTracker: ObservableObject {
     }
 
     func refresh() {
-        if isDemo { return }
+        if isDemo || isRefreshing { return }
         isRefreshing = true
+        lastRefreshDate = Date()
         let claude = claudeDir
         let gemini = geminiDir
         let keychainToken = cachedKeychainToken
 
         Task.detached(priority: .utility) {
-            var cStats = Self.computeClaude(claudeDir: claude)
-            let aStats = Self.computeAntigravity(geminiDir: gemini)
+            var cStats = await Self.computeClaude(claudeDir: claude)
+            let aStats = await Self.computeAntigravity(geminiDir: gemini)
 
             // Try reading OAuth token from ~/.claude/.credentials.json or cached Keychain token
             if let token = keychainToken ?? Self.readClaudeCredentialsFile(claudeDir: claude),
@@ -279,7 +337,7 @@ final class AgentUsageTracker: ObservableObject {
 
     // MARK: - Local Transcript Aggregation
 
-    nonisolated private static func computeClaude(claudeDir: URL) -> UsageStats {
+    nonisolated private static func computeClaude(claudeDir: URL) async -> UsageStats {
         let cal = Calendar.current
         let now = Date()
         let fiveHoursAgo = now.addingTimeInterval(-5 * 3600)
@@ -299,90 +357,80 @@ final class AgentUsageTracker: ObservableObject {
             return stats
         }
 
+        let resKeys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey, .isDirectoryKey]
         var seenRequests = Set<String>()
 
         for slug in slugs {
             let topItems = (try? FileManager.default.contentsOfDirectory(
-                at: slug, includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey])) ?? []
+                at: slug, includingPropertiesForKeys: resKeys)) ?? []
             var jsonlFiles: [URL] = []
             for item in topItems {
                 if item.pathExtension == "jsonl" {
                     jsonlFiles.append(item)
                 } else if (try? item.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
-                    // Include subagent transcripts inside <sessionId>/subagents/*.jsonl
                     let subDir = item.appendingPathComponent("subagents")
                     let subFiles = (try? FileManager.default.contentsOfDirectory(
-                        at: subDir, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+                        at: subDir, includingPropertiesForKeys: resKeys)) ?? []
                     jsonlFiles.append(contentsOf: subFiles.filter { $0.pathExtension == "jsonl" })
                 }
             }
 
             for file in jsonlFiles {
-                guard let mdate = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                guard let vals = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                      let mdate = vals.contentModificationDate,
                       mdate >= sevenDaysAgo else { continue }
-                guard let data = try? Data(contentsOf: file) else { continue }
+                let size = UInt64(vals.fileSize ?? 0)
 
-                for line in data.split(separator: UInt8(ascii: "\n")) {
-                    parseClaudeLine(Data(line), fiveHoursAgo: fiveHoursAgo, startOfDay: startOfDay,
-                                    sevenDaysAgo: sevenDaysAgo, iso: iso, isoFrac: isoFrac,
-                                    seen: &seenRequests, stats: &stats)
+                let entries = await UsageFileCache.shared.claudeEntries(for: file, modDate: mdate, size: size) {
+                    var parsedEntries: [UsageEntry] = []
+                    autoreleasepool {
+                        guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else { return }
+                        for line in data.split(separator: UInt8(ascii: "\n")) {
+                            // Fast pre-filter before full JSONSerialization
+                            guard line.count > 20 else { continue }
+                            if let entry = parseClaudeLineToEntry(line, sevenDaysAgo: sevenDaysAgo, iso: iso, isoFrac: isoFrac, seen: &seenRequests) {
+                                parsedEntries.append(entry)
+                            }
+                        }
+                    }
+                    return parsedEntries
+                }
+
+                for e in entries where e.date >= sevenDaysAgo {
+                    accumulate(e, fiveHoursAgo: fiveHoursAgo, startOfDay: startOfDay, stats: &stats)
                 }
             }
         }
         return stats
     }
 
-    nonisolated private static func parseClaudeLine(_ lineData: Data, fiveHoursAgo: Date, startOfDay: Date,
-                                                    sevenDaysAgo: Date, iso: ISO8601DateFormatter,
-                                                    isoFrac: ISO8601DateFormatter, seen: inout Set<String>,
-                                                    stats: inout UsageStats) {
-        guard let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+    nonisolated private static func parseClaudeLineToEntry(_ lineSlice: Data.SubSequence, sevenDaysAgo: Date,
+                                                           iso: ISO8601DateFormatter, isoFrac: ISO8601DateFormatter,
+                                                           seen: inout Set<String>) -> UsageEntry? {
+        guard let obj = try? JSONSerialization.jsonObject(with: Data(lineSlice)) as? [String: Any],
+              let msg = obj["message"] as? [String: Any],
+              let u = msg["usage"] as? [String: Any],
               let tsStr = obj["timestamp"] as? String ?? obj["created_at"] as? String,
               let date = isoFrac.date(from: tsStr) ?? iso.date(from: tsStr),
-              date >= sevenDaysAgo else { return }
-
-        guard let msg = obj["message"] as? [String: Any],
-              let u = msg["usage"] as? [String: Any] else { return }
+              date >= sevenDaysAgo else { return nil }
 
         let reqId = obj["requestId"] as? String ?? msg["id"] as? String ?? ""
         if !reqId.isEmpty {
-            if seen.contains(reqId) { return }
+            if seen.contains(reqId) { return nil }
             seen.insert(reqId)
         }
 
         let int = { (k: String) in u[k] as? Int ?? 0 }
-        let inp = int("input_tokens")
-        let cacheWrite = int("cache_creation_input_tokens")
-        let cacheRead = int("cache_read_input_tokens")
-        let out = int("output_tokens")
-
-        stats.weeklyInput += inp
-        stats.weeklyOutput += out
-        stats.weeklyCacheWrite += cacheWrite
-        stats.weeklyCacheRead += cacheRead
-        if stats.weeklyOldestInWindow == nil || date < stats.weeklyOldestInWindow! {
-            stats.weeklyOldestInWindow = date
-        }
-
-        if date >= startOfDay {
-            stats.dailyInput += inp
-            stats.dailyOutput += out
-            stats.dailyCacheWrite += cacheWrite
-            stats.dailyCacheRead += cacheRead
-        }
-
-        if date >= fiveHoursAgo {
-            stats.sessionInput += inp
-            stats.sessionOutput += out
-            stats.sessionCacheWrite += cacheWrite
-            stats.sessionCacheRead += cacheRead
-            if stats.sessionOldestInWindow == nil || date < stats.sessionOldestInWindow! {
-                stats.sessionOldestInWindow = date
-            }
-        }
+        return UsageEntry(
+            date: date,
+            input: int("input_tokens"),
+            output: int("output_tokens"),
+            cacheWrite: int("cache_creation_input_tokens"),
+            cacheRead: int("cache_read_input_tokens")
+        )
     }
 
-    nonisolated private static func computeAntigravity(geminiDir: URL) -> UsageStats {
+    nonisolated private static func computeAntigravity(geminiDir: URL) async -> UsageStats {
         let cal = Calendar.current
         let now = Date()
         let fiveHoursAgo = now.addingTimeInterval(-5 * 3600)
@@ -408,64 +456,80 @@ final class AgentUsageTracker: ObservableObject {
             for conv in convs {
                 let convID = conv.lastPathComponent
                 let file = conv.appendingPathComponent(".system_generated/logs/transcript.jsonl")
-                guard let mdate = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate,
+                guard let vals = try? file.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
+                      let mdate = vals.contentModificationDate,
                       mdate >= sevenDaysAgo else { continue }
-                guard let data = try? Data(contentsOf: file) else { continue }
+                let size = UInt64(vals.fileSize ?? 0)
 
-                for line in data.split(separator: UInt8(ascii: "\n")) {
-                    parseAgyLine(Data(line), convID: convID, fiveHoursAgo: fiveHoursAgo,
-                                 startOfDay: startOfDay, sevenDaysAgo: sevenDaysAgo,
-                                 iso: iso, isoFrac: isoFrac, seen: &seenConvSteps, stats: &stats)
+                let entries = await UsageFileCache.shared.agyEntries(for: file, modDate: mdate, size: size) {
+                    var parsedEntries: [UsageEntry] = []
+                    autoreleasepool {
+                        guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else { return }
+                        for line in data.split(separator: UInt8(ascii: "\n")) {
+                            if let entry = parseAgyLineToEntry(line, convID: convID, sevenDaysAgo: sevenDaysAgo, iso: iso, isoFrac: isoFrac, seen: &seenConvSteps) {
+                                parsedEntries.append(entry)
+                            }
+                        }
+                    }
+                    return parsedEntries
+                }
+
+                for e in entries where e.date >= sevenDaysAgo {
+                    accumulate(e, fiveHoursAgo: fiveHoursAgo, startOfDay: startOfDay, stats: &stats)
                 }
             }
         }
         return stats
     }
 
-    nonisolated private static func parseAgyLine(_ lineData: Data, convID: String, fiveHoursAgo: Date,
-                                                 startOfDay: Date, sevenDaysAgo: Date,
-                                                 iso: ISO8601DateFormatter, isoFrac: ISO8601DateFormatter,
-                                                 seen: inout Set<String>, stats: inout UsageStats) {
-        guard let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+    nonisolated private static func parseAgyLineToEntry(_ lineSlice: Data.SubSequence, convID: String, sevenDaysAgo: Date,
+                                                        iso: ISO8601DateFormatter, isoFrac: ISO8601DateFormatter,
+                                                        seen: inout Set<String>) -> UsageEntry? {
+        guard let obj = try? JSONSerialization.jsonObject(with: Data(lineSlice)) as? [String: Any],
               (obj["type"] as? String) == "PLANNER_RESPONSE",
               let tsStr = obj["created_at"] as? String,
               let date = isoFrac.date(from: tsStr) ?? iso.date(from: tsStr),
-              date >= sevenDaysAgo else { return }
+              date >= sevenDaysAgo else { return nil }
 
         if let idx = obj["step_index"] as? Int {
             let key = "\(convID):\(idx)"
-            if seen.contains(key) { return }
+            if seen.contains(key) { return nil }
             seen.insert(key)
         }
 
         let int = { (k: String) in obj[k] as? Int ?? 0 }
-        let inp = int("input_tokens")
-        let cacheWrite = int("cache_creation_tokens") + int("cache_write_tokens")
-        let cacheRead = int("cache_read_tokens")
-        let out = int("output_tokens")
+        return UsageEntry(
+            date: date,
+            input: int("input_tokens"),
+            output: int("output_tokens"),
+            cacheWrite: int("cache_creation_tokens") + int("cache_write_tokens"),
+            cacheRead: int("cache_read_tokens")
+        )
+    }
 
-        stats.weeklyInput += inp
-        stats.weeklyOutput += out
-        stats.weeklyCacheWrite += cacheWrite
-        stats.weeklyCacheRead += cacheRead
-        if stats.weeklyOldestInWindow == nil || date < stats.weeklyOldestInWindow! {
-            stats.weeklyOldestInWindow = date
+    nonisolated private static func accumulate(_ e: UsageEntry, fiveHoursAgo: Date, startOfDay: Date, stats: inout UsageStats) {
+        stats.weeklyInput += e.input
+        stats.weeklyOutput += e.output
+        stats.weeklyCacheWrite += e.cacheWrite
+        stats.weeklyCacheRead += e.cacheRead
+        if stats.weeklyOldestInWindow == nil || e.date < stats.weeklyOldestInWindow! {
+            stats.weeklyOldestInWindow = e.date
         }
 
-        if date >= startOfDay {
-            stats.dailyInput += inp
-            stats.dailyOutput += out
-            stats.dailyCacheWrite += cacheWrite
-            stats.dailyCacheRead += cacheRead
+        if e.date >= startOfDay {
+            stats.dailyInput += e.input
+            stats.dailyOutput += e.output
+            stats.dailyCacheWrite += e.cacheWrite
+            stats.dailyCacheRead += e.cacheRead
         }
 
-        if date >= fiveHoursAgo {
-            stats.sessionInput += inp
-            stats.sessionOutput += out
-            stats.sessionCacheWrite += cacheWrite
-            stats.sessionCacheRead += cacheRead
-            if stats.sessionOldestInWindow == nil || date < stats.sessionOldestInWindow! {
-                stats.sessionOldestInWindow = date
+        if e.date >= fiveHoursAgo {
+            stats.sessionInput += e.input
+            stats.sessionOutput += e.output
+            stats.sessionCacheWrite += e.cacheWrite
+            stats.sessionCacheRead += e.cacheRead
+            if stats.sessionOldestInWindow == nil || e.date < stats.sessionOldestInWindow! {
+                stats.sessionOldestInWindow = e.date
             }
         }
     }

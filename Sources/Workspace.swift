@@ -43,7 +43,12 @@ struct WorkspaceView: View {
             pills
             content.frame(height: 300)
         }
-        .onAppear { store.start() }
+        .onAppear {
+            if current == .builtin(.git) { store.start() }
+        }
+        .onChange(of: current) {
+            if current == .builtin(.git) { store.start() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: Notification.Name("DemoSwitchSection"))) { note in
             if let appSec = note.object as? AppSection {
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {

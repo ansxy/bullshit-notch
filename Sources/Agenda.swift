@@ -65,7 +65,8 @@ final class Agenda: ObservableObject {
     func start() {
         if isDemo { return }
         if started {
-            checkAuthorizationAndReload(resetCache: true)
+            checkAuthorizationAndReload(resetCache: false)
+            startTimer()
             return
         }
         started = true
@@ -73,20 +74,27 @@ final class Agenda: ObservableObject {
 
         NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated {
-                Agenda.shared.store.reset()
                 Agenda.shared.reload()
             }
         }
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated {
-                Agenda.shared.checkAuthorizationAndReload(resetCache: true)
+                Agenda.shared.checkAuthorizationAndReload(resetCache: false)
             }
         }
-        if meetingTimer == nil {
-            meetingTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
-                Task { @MainActor in
-                    Agenda.shared.checkAuthorizationAndReload(resetCache: true)
-                }
+        startTimer()
+    }
+
+    func stop() {
+        meetingTimer?.invalidate()
+        meetingTimer = nil
+    }
+
+    private func startTimer() {
+        guard meetingTimer == nil else { return }
+        meetingTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            Task { @MainActor in
+                Agenda.shared.checkAuthorizationAndReload(resetCache: false)
             }
         }
     }
