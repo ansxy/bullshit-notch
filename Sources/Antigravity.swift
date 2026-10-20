@@ -35,6 +35,7 @@ final class AntigravitySessions {
     func refresh() -> [(agent: Agent, tokens: (input: Int, output: Int))] {
         var result: [(agent: Agent, tokens: (input: Int, output: Int))] = []
         var live: Set<String> = []
+        var liveURLs: Set<URL> = []
         for root in roots {
             let presence = root.appendingPathComponent("presence")
             let locks = (try? FileManager.default.contentsOfDirectory(
@@ -45,6 +46,7 @@ final class AntigravitySessions {
                 live.insert(id)
                 let transcript = root.appendingPathComponent("brain").appendingPathComponent(id)
                     .appendingPathComponent(".system_generated/logs/transcript.jsonl")
+                liveURLs.insert(transcript)
                 var p = parse(transcript)
                 // ponytail: if the transcript has been silent for 10 min, assume we misread a final step and call it idle.
                 if p.status == "busy", let last = p.lastStep, last.timeIntervalSinceNow < -600 { p.status = "idle" }
@@ -56,6 +58,7 @@ final class AntigravitySessions {
             }
         }
         owners = owners.filter { live.contains($0.key) }
+        parsed = parsed.filter { liveURLs.contains($0.key) }
         return result
     }
 
@@ -93,8 +96,10 @@ final class AntigravitySessions {
         let data = (try? handle.readToEnd()) ?? Data()
         // Only consume complete lines; a half-written last line is picked up next poll.
         if let end = data.lastIndex(of: UInt8(ascii: "\n")) {
-            for line in data[..<end].split(separator: UInt8(ascii: "\n")) {
-                read(line, into: &entry)
+            autoreleasepool {
+                for line in data[..<end].split(separator: UInt8(ascii: "\n")) {
+                    read(line, into: &entry)
+                }
             }
             entry.offset += UInt64(end - data.startIndex + 1)
         }

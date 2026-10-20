@@ -130,18 +130,20 @@ final class AgentStore: ObservableObject {
             loadDemoData()
         } else {
             refresh()
-            Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in
+            Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { _ in
                 Task { @MainActor in AgentStore.shared.refresh() }
             }
         }
-        Timer.scheduledTimer(withTimeInterval: 0.07, repeats: true) { _ in
+        Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { _ in
             Task { @MainActor in
                 let store = AgentStore.shared
                 let alwaysOn = UserDefaults.standard.bool(forKey: Pref.agentAnimationAlwaysOn)
-                // Busy (or preview enabled): animate. Idle: reset, so the next run ignites from scratch.
-                if store.busyCount > 0 || alwaysOn {
+                let liveAgents = UserDefaults.standard.bool(forKey: Pref.liveAgents)
+                let expanded = NotchModel.shared?.expanded ?? false
+                // Busy (or preview enabled) while closed: animate. Idle: reset, so the next run ignites from scratch.
+                if !expanded && ((liveAgents && store.busyCount > 0) || alwaysOn) {
                     store.fire.step()
-                } else if store.fire.steps > 0 {
+                } else if store.fire.steps > 0 && !(liveAgents && store.busyCount > 0) && !alwaysOn {
                     store.fire = Fire()
                 }
             }
@@ -177,29 +179,42 @@ final class AgentStore: ObservableObject {
             .filter { $0.pathExtension == "json" }
             .compactMap { try? JSONDecoder().decode(Agent.self, from: Data(contentsOf: $0)) }
             .filter { kill($0.pid, 0) == 0 }  // drop sessions whose process has exited
+        var activeSessionIDs: Set<String> = []
+        var activeURLs: Set<URL> = []
         for agent in claudeAgents {
+            activeSessionIDs.insert(agent.sessionId)
             // Project dir = cwd with non-alphanumerics → "-".
             let slug = String(agent.cwd.map { $0.isLetter || $0.isNumber ? $0 : "-" })
             let project = claude.appendingPathComponent("projects").appendingPathComponent(slug)
-            let main = parse(project.appendingPathComponent(agent.sessionId + ".jsonl"))
-            let subs = subagents(in: project.appendingPathComponent(agent.sessionId), finished: main.finished)
+            let mainURL = project.appendingPathComponent(agent.sessionId + ".jsonl")
+            activeURLs.insert(mainURL)
+            let main = parse(mainURL)
+            let subs = subagents(in: project.appendingPathComponent(agent.sessionId), finished: main.finished, activeURLs: &activeURLs)
             tokens[agent.sessionId] = subs.reduce(main.total) { ($0.0 + $1.tokens.input, $0.1 + $1.tokens.output) }
             subagents[agent.sessionId] = subs
                 .filter { !$0.finished || $0.lastActive.timeIntervalSinceNow > -300 }  // running + done in last 5 min
                 .sorted { $0.started < $1.started }
         }
         let agyAgents = antigravity.refresh()
-        for (agent, usage) in agyAgents { tokens[agent.sessionId] = usage }
+        for (agent, usage) in agyAgents {
+            activeSessionIDs.insert(agent.sessionId)
+            tokens[agent.sessionId] = usage
+        }
+        // Prune dead sessions so parsed caches don't grow unbounded.
+        parsed = parsed.filter { activeURLs.contains($0.key) }
+        tokens = tokens.filter { activeSessionIDs.contains($0.key) }
+        subagents = subagents.filter { activeSessionIDs.contains($0.key) }
         agents = (claudeAgents + agyAgents.map(\.agent)).sorted { $0.startedAt > $1.startedAt }
     }
 
     /// Every subagent of a session. Done = the parent transcript has its task-notification or final tool result.
-    private func subagents(in sessionDir: URL, finished: Set<String>) -> [SubAgent] {
+    private func subagents(in sessionDir: URL, finished: Set<String>, activeURLs: inout Set<URL>) -> [SubAgent] {
         struct Meta: Decodable { let agentType: String?; let description: String?; let toolUseId: String?; let stoppedByUser: Bool? }
         let dir = sessionDir.appendingPathComponent("subagents")
         let keys: [URLResourceKey] = [.creationDateKey, .contentModificationDateKey]
         let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: keys)) ?? []
         return files.filter { $0.pathExtension == "jsonl" }.map { url in
+            activeURLs.insert(url)
             let name = url.deletingPathExtension().lastPathComponent          // agent-<id>
             let id = String(name.dropFirst("agent-".count))
             let meta = (try? Data(contentsOf: dir.appendingPathComponent(name + ".meta.json")))
@@ -224,8 +239,10 @@ final class AgentStore: ObservableObject {
         let data = (try? handle.readToEnd()) ?? Data()
         // Only consume complete lines; a half-written last line is picked up next poll.
         if let end = data.lastIndex(of: UInt8(ascii: "\n")) {
-            for line in data[..<end].split(separator: UInt8(ascii: "\n")) {
-                read(line, into: &entry)
+            autoreleasepool {
+                for line in data[..<end].split(separator: UInt8(ascii: "\n")) {
+                    read(line, into: &entry)
+                }
             }
             entry.offset += UInt64(end - data.startIndex + 1)
         }
@@ -280,7 +297,10 @@ struct AgentsView: View {
             }
         }
         .onAppear {
-            AgentUsageTracker.shared.refresh()
+            AgentUsageTracker.shared.startPolling()
+        }
+        .onDisappear {
+            AgentUsageTracker.shared.stopPolling()
         }
     }
 
@@ -757,20 +777,43 @@ struct Fire {
 extension Fire {
     private static let pixel: CGFloat = 2.0
 
-    /// The selected animation as an image of tiny squares spanning the width and height of the notch.
+    /// The selected animation as a lightweight 140×14 pixel bitmap scaled crisply with nearest-neighbor interpolation.
     func image(style: AgentAnimationStyle = .fire) -> NSImage {
         let rows = Fire.drawRows
-        let size = NSSize(width: CGFloat(Fire.cols) * Self.pixel, height: CGFloat(rows) * Self.pixel)
-        // Drawn lazily at the screen's scale, so it stays crisp on Retina.
-        return NSImage(size: size, flipped: true) { _ in
-            for r in 0..<rows {
-                for c in 0..<Fire.cols {
-                    guard let color = color(row: r, col: c, style: style) else { continue }
-                    color.setFill()
-                    NSRect(x: CGFloat(c) * Self.pixel, y: CGFloat(r) * Self.pixel, width: Self.pixel, height: Self.pixel).fill()
-                }
-            }
-            return true
+        let cols = Fire.cols
+        let size = NSSize(width: CGFloat(cols) * Self.pixel, height: CGFloat(rows) * Self.pixel)
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: cols,
+            pixelsHigh: rows,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bitmapFormat: [],
+            bytesPerRow: cols * 4,
+            bitsPerPixel: 32
+        ), let ptr = rep.bitmapData else {
+            return NSImage(size: size)
         }
+
+        memset(ptr, 0, cols * rows * 4)
+        for r in 0..<rows {
+            for c in 0..<cols {
+                guard let color = color(row: r, col: c, style: style),
+                      let rgb = color.usingColorSpace(.deviceRGB) else { continue }
+                let a = rgb.alphaComponent
+                let idx = (r * cols + c) * 4
+                ptr[idx]     = UInt8(max(0, min(255, (rgb.redComponent * a * 255).rounded())))
+                ptr[idx + 1] = UInt8(max(0, min(255, (rgb.greenComponent * a * 255).rounded())))
+                ptr[idx + 2] = UInt8(max(0, min(255, (rgb.blueComponent * a * 255).rounded())))
+                ptr[idx + 3] = UInt8(max(0, min(255, (a * 255).rounded())))
+            }
+        }
+
+        let img = NSImage(size: size)
+        img.addRepresentation(rep)
+        return img
     }
 }
