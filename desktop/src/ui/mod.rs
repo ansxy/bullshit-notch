@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod home;
+pub mod settings;
 pub mod shelf;
 pub mod wings;
 pub mod workspace;
@@ -66,6 +67,8 @@ pub enum Action {
     LaunchTerm(String),
     LaunchAgent(String),
     ContainerCmd(String, String, String),
+    OpenSettings,
+    Quit,
 }
 
 /// Panel UI state that survives frames (not persisted).
@@ -87,6 +90,8 @@ pub struct UiState {
     pub pr_list: PrList,
     pub new_project_name: String,
     pub new_project_path: String,
+    pub settings_open: bool,
+    pub settings_tab: settings::SettingsTab,
 }
 
 /// Rounded translucent card (`NotchCardBackground`).
@@ -387,6 +392,11 @@ fn tab_bar(ui: &mut egui::Ui, v: &View, st: &mut UiState) {
         if v.prefs.tab_topbar {
             tab_pill(ui, st, NotchTab::Workspace, "Workspace");
         }
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui.add(egui::Button::new(egui::RichText::new("⚙").size(11.0)).frame(false)).clicked() {
+                st.settings_open = true;
+            }
+        });
     });
 }
 

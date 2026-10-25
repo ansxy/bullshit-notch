@@ -1,5 +1,6 @@
 use crate::config::Prefs;
 use crate::fire::Fire;
+use crate::platform::tray::{self, TrayAction, TrayHandle};
 use crate::platform::{self, Overlay};
 use crate::shape::Spring;
 use crate::stores::agents::{AgentParseState, AgentSnapshot, Harness};
@@ -80,6 +81,7 @@ pub struct BullshitNotchApp {
     ui_state: ui::UiState,
     /// `--open`: keep the panel expanded (layout debugging / screenshots).
     pin_open: bool,
+    tray: TrayHandle,
 }
 
 impl BullshitNotchApp {
@@ -154,6 +156,7 @@ impl BullshitNotchApp {
             // Swift demo opens on the Claude filter to show the limits card.
             ui_state: ui::UiState { agent_filter: demo.then_some(Harness::Claude), ..Default::default() },
             pin_open: std::env::args().any(|a| a == "--open"),
+            tray: tray::spawn(),
             prefs,
             overlay: Overlay::new(),
             overlay_ready: false,
@@ -321,8 +324,31 @@ impl eframe::App for BullshitNotchApp {
         let (shape_rect, actions) = ui::draw_notch(ctx, &view, &mut self.ui_state);
         let transient = hud.visible() || battery.just_changed();
         self.last_shape_rect = shape_rect;
+        let mut quit = false;
         for action in actions {
-            self.apply(action);
+            if matches!(action, ui::Action::Quit) {
+                quit = true;
+            } else {
+                self.apply(action);
+            }
+        }
+        while let Some(ev) = self.tray.poll() {
+            match ev {
+                TrayAction::Settings => self.ui_state.settings_open = true,
+                TrayAction::Quit => quit = true,
+            }
+        }
+        if self.ui_state.settings_open {
+            ui::settings::show_window(
+                ctx,
+                &mut self.prefs,
+                &mut self.ui_state.settings_tab,
+                &mut self.ui_state.settings_open,
+                &mut quit,
+            );
+        }
+        if quit {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
 
         // Open/animating → full-window input so mouse-leave reaches egui.
@@ -403,6 +429,8 @@ impl BullshitNotchApp {
                 }
             }
             ui::Action::ContainerCmd(cli, id, verb) => crate::stores::containers::container_action(&cli, &id, &verb),
+            ui::Action::OpenSettings => self.ui_state.settings_open = true,
+            ui::Action::Quit => {}
         }
     }
 }

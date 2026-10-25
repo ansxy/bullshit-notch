@@ -1,5 +1,6 @@
 pub mod http;
 pub mod process;
+pub mod tray;
 
 #[cfg(windows)]
 pub mod win32;
