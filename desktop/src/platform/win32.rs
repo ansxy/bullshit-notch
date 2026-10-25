@@ -151,9 +151,28 @@ unsafe fn set_no_activate(hwnd: windows::Win32::Foundation::HWND, no_activate: b
 #[cfg(windows)]
 unsafe fn cursor_and_drag() -> (Pos2, bool) {
     use windows::Win32::Foundation::POINT;
-    use windows::Win32::UI::WindowsAndMessaging::{GetAsyncKeyState, GetCursorPos, VK_LBUTTON};
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON};
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
     let mut pt = POINT::default();
     let _ = GetCursorPos(&mut pt);
     let dragging = GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000 != 0;
     (Pos2::new(pt.x as f32, pt.y as f32), dragging)
+}
+
+/// Physical-pixel cursor via `GetCursorPos`.
+pub fn global_cursor_screen_pos() -> Option<Pos2> {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        unsafe {
+            let mut pt = POINT::default();
+            GetCursorPos(&mut pt).ok()?;
+            return Some(Pos2::new(pt.x as f32, pt.y as f32));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
 }

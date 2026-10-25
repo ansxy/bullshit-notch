@@ -18,13 +18,43 @@ pub async fn run_hidden(program: &str, args: &[&str]) -> io::Result<CommandOutpu
         .stderr(Stdio::piped());
 
     #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    cmd.creation_flags(CREATE_NO_WINDOW);
 
     let output = cmd.output().await?;
+    Ok(CommandOutput {
+        status: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Blocking variant for store worker threads.
+pub fn run_hidden_sync(program: &str, args: &[&str]) -> io::Result<CommandOutput> {
+    run_hidden_sync_in(program, args, None)
+}
+
+pub fn run_hidden_sync_in(
+    program: &str,
+    args: &[&str],
+    cwd: Option<&std::path::Path>,
+) -> io::Result<CommandOutput> {
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(dir) = cwd {
+        cmd.current_dir(dir);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let output = cmd.output()?;
     Ok(CommandOutput {
         status: output.status.code().unwrap_or(-1),
         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),

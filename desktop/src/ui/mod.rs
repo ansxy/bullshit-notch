@@ -1,7 +1,8 @@
 use crate::config::Prefs;
 use crate::shape::{NotchShape, Spring};
 use crate::stores::agents::{Agent, AgentSnapshot};
-use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, Vec2};
+use eframe::egui::{self, Color32, Mesh, Pos2, Rect, Sense, Shape, Stroke, TextureId, Vec2};
+use eframe::epaint::Vertex;
 
 /// Draw the notch silhouette + closed wings or expanded agents list.
 /// Returns the logical shape rect used for hit-testing.
@@ -19,10 +20,11 @@ pub fn draw_notch(
     let shape = NotchShape::lerp(NotchShape::collapsed(), NotchShape::expanded(), t);
 
     let screen = ctx.screen_rect();
-    let closed_w = 280.0 + prefs.idle_width + prefs.width_adjust;
+    // macOS closed ≈ physical notch (~200) + idleWidth wings (48).
+    let closed_w = 200.0 + prefs.idle_width + prefs.width_adjust;
     let open_w = 620.0;
     let width = closed_w + (open_w - closed_w) * t;
-    let closed_h = 32.0 + prefs.height_adjust;
+    let closed_h = 30.0 + prefs.height_adjust;
     let open_h = 280.0;
     let height = closed_h + (open_h - closed_h) * t;
 
@@ -35,95 +37,132 @@ pub fn draw_notch(
         .frame(egui::Frame::none())
         .show(ctx, |ui| {
             let painter = ui.painter();
-            let pts = shape.sample_points(rect, 16);
+            let pts = shape.sample_points(rect, 20);
             if pts.len() >= 3 {
+                // Base fill
                 painter.add(Shape::convex_polygon(
                     pts.clone(),
                     Color32::from_rgb(8, 8, 10),
                     Stroke::NONE,
                 ));
-                // Hairline rim
+
+                // Fire clipped to notch path (== macOS `.clipShape(NotchShape)`).
+                // Drawing a rectangle left flared corners empty → goofy side gaps.
+                if burning && t < 0.35 {
+                    if let Some(tex) = fire_tex {
+                        let wash = Color32::from_rgba_unmultiplied(
+                            accent[0],
+                            accent[1],
+                            accent[2],
+                            70,
+                        );
+                        painter.add(Shape::convex_polygon(pts.clone(), wash, Stroke::NONE));
+                        painter.add(Shape::mesh(textured_convex_mesh(
+                            tex.id(),
+                            &pts,
+                            rect,
+                            Color32::WHITE,
+                        )));
+                    }
+                }
+
                 painter.add(Shape::closed_line(
-                    pts,
+                    pts.clone(),
                     Stroke::new(1.0_f32, Color32::from_rgba_unmultiplied(255, 255, 255, 40)),
                 ));
             }
 
-            // Ambient accent glow
-            let glow = Color32::from_rgba_unmultiplied(accent[0], accent[1], accent[2], 40);
-            painter.circle_filled(rect.center(), rect.width() * 0.35, glow);
-
             if t < 0.35 {
-                draw_closed(ui, rect, fire_tex, burning, prefs);
+                draw_closed_chrome(ui, rect, burning);
             } else {
-                draw_expanded(ui, rect, snap, face_frame);
+                draw_expanded(ui, rect, &shape, snap, face_frame);
             }
 
-            // Invisible interact layer over shape for hover
             let _ = ui.allocate_rect(rect.expand(4.0), Sense::hover());
         });
 
     rect
 }
 
-fn draw_closed(
-    ui: &mut egui::Ui,
-    rect: Rect,
-    fire_tex: Option<&egui::TextureHandle>,
-    burning: bool,
-    prefs: &Prefs,
-) {
-    let painter = ui.painter();
-    let spacer = 48.0 + prefs.width_adjust.max(0.0);
-    let mid = rect.center();
-
-    // Camera spacer (empty center)
-    let _ = spacer;
-
-    if burning {
-        if let Some(tex) = fire_tex {
-            let fire_rect = Rect::from_center_size(
-                Pos2::new(mid.x, rect.max.y - 10.0),
-                Vec2::new(rect.width() * 0.85, 14.0),
-            );
-            painter.image(
-                tex.id(),
-                fire_rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                Color32::WHITE,
-            );
-        }
-    } else {
-        painter.text(
-            mid,
-            egui::Align2::CENTER_CENTER,
-            "bullshit",
-            egui::FontId::proportional(11.0),
-            Color32::from_gray(120),
+/// Fan-triangulate a convex notch path and map the fire texture across `rect` UVs.
+fn textured_convex_mesh(tex: TextureId, pts: &[Pos2], rect: Rect, tint: Color32) -> Mesh {
+    let mut mesh = Mesh::with_texture(tex);
+    let w = rect.width().max(1.0);
+    let h = rect.height().max(1.0);
+    for p in pts {
+        let uv = Pos2::new(
+            ((p.x - rect.min.x) / w).clamp(0.0, 1.0),
+            ((p.y - rect.min.y) / h).clamp(0.0, 1.0),
         );
+        mesh.vertices.push(Vertex {
+            pos: *p,
+            uv,
+            color: tint,
+        });
     }
+    for i in 1..pts.len().saturating_sub(1) {
+        mesh.indices.push(0);
+        mesh.indices.push(i as u32);
+        mesh.indices.push((i + 1) as u32);
+    }
+    mesh
 }
 
-fn draw_expanded(ui: &mut egui::Ui, rect: Rect, snap: &AgentSnapshot, face_frame: usize) {
-    let inner = rect.shrink2(Vec2::new(24.0, 18.0));
+fn draw_closed_chrome(ui: &mut egui::Ui, rect: Rect, burning: bool) {
+    if burning {
+        return; // fire mesh is the closed content (demo backdrop)
+    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        "bullshit",
+        egui::FontId::proportional(11.0),
+        Color32::from_gray(120),
+    );
+}
+
+fn draw_expanded(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    shape: &NotchShape,
+    snap: &AgentSnapshot,
+    face_frame: usize,
+) {
+    let pad_x = shape.flare + 10.0;
+    let pad_top = shape.flare_depth + 10.0;
+    let pad_bot = shape.bottom + 8.0;
+    let inner = Rect::from_min_max(
+        Pos2::new(rect.min.x + pad_x, rect.min.y + pad_top),
+        Pos2::new(rect.max.x - pad_x, rect.max.y - pad_bot),
+    );
+
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner), |ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
                 ui.label(
                     egui::RichText::new("Agents")
                         .color(Color32::WHITE)
-                        .size(14.0)
+                        .size(13.0)
                         .strong(),
                 );
+                ui.add_space(6.0);
                 ui.label(
                     egui::RichText::new(format!("{} busy", snap.busy_count()))
                         .color(Color32::from_rgb(255, 160, 60))
                         .size(11.0),
                 );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!("{} sessions", snap.agents.len()))
+                            .color(Color32::from_gray(130))
+                            .size(10.0),
+                    );
+                });
             });
-            ui.add_space(6.0);
+            ui.add_space(8.0);
             egui::ScrollArea::vertical()
-                .max_height(inner.height() - 28.0)
+                .max_height((inner.height() - 36.0).max(40.0))
                 .show(ui, |ui| {
                     if snap.agents.is_empty() {
                         ui.label(
@@ -134,6 +173,9 @@ fn draw_expanded(ui: &mut egui::Ui, rect: Rect, snap: &AgentSnapshot, face_frame
                     }
                     for agent in &snap.agents {
                         agent_row(ui, agent, snap, face_frame);
+                        ui.add_space(2.0);
+                        ui.separator();
+                        ui.add_space(2.0);
                     }
                 });
         });
@@ -152,12 +194,14 @@ fn agent_row(ui: &mut egui::Ui, agent: &Agent, snap: &AgentSnapshot, face_frame:
         .copied()
         .unwrap_or((0, 0));
     ui.horizontal(|ui| {
+        ui.add_space(2.0);
         ui.label(
             egui::RichText::new(face)
                 .monospace()
                 .color(Color32::from_rgb(255, 180, 80))
                 .size(12.0),
         );
+        ui.add_space(6.0);
         ui.vertical(|ui| {
             ui.label(
                 egui::RichText::new(title)
@@ -166,7 +210,7 @@ fn agent_row(ui: &mut egui::Ui, agent: &Agent, snap: &AgentSnapshot, face_frame:
             );
             ui.label(
                 egui::RichText::new(format!(
-                    "{} · in {:} out {:}",
+                    "{} · in {} out {}",
                     agent.status.as_deref().unwrap_or("idle"),
                     compact(tokens.0),
                     compact(tokens.1)
@@ -176,7 +220,6 @@ fn agent_row(ui: &mut egui::Ui, agent: &Agent, snap: &AgentSnapshot, face_frame:
             );
         });
     });
-    ui.add_space(4.0);
 }
 
 fn compact(n: u64) -> String {

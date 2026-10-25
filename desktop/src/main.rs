@@ -14,19 +14,29 @@ use eframe::egui;
 fn main() -> eframe::Result<()> {
     let demo = std::env::args().any(|a| a == "--demo");
 
-    let mut viewport = egui::ViewportBuilder::default()
+    // Must be X11/XWayland for XShape click-through + leave detection.
+    // ponytail: set before any winit init; Wayland cannot do this overlay properly yet.
+    #[cfg(target_os = "linux")]
+    {
+        if std::env::var_os("WINIT_UNIX_BACKEND").is_none() {
+            std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+        }
+    }
+
+    // Top-of-screen overlay. Exact x recentered once monitor size known (see app).
+    let viewport = egui::ViewportBuilder::default()
         .with_decorations(false)
         .with_transparent(true)
         .with_always_on_top()
         .with_inner_size([680.0, 420.0])
+        .with_position([0.0, 0.0])
         .with_title("BullshitNotch");
 
-    // Position near top-center; exact monitor math refined by WM.
-    viewport = viewport.with_position([100.0, 0.0]);
-
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
     let mut native = eframe::NativeOptions {
         viewport,
-        centered: true,
+        // Must stay false — `centered: true` parks the notch mid-screen.
+        centered: false,
         ..Default::default()
     };
 

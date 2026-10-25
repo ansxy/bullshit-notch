@@ -18,6 +18,42 @@ pub fn is_cursor_inside_shape(
     shape_rect_logical.expand(4.0).contains(local)
 }
 
+/// Global screen-space cursor in **physical** pixels (OS coords).
+pub fn global_cursor_screen_pos() -> Option<Pos2> {
+    #[cfg(windows)]
+    {
+        return win32::global_cursor_screen_pos();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        return x11::global_cursor_screen_pos();
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        None
+    }
+}
+
+/// Best-effort "is cursor over the notch shape?" for open/close.
+/// Linux uses X11 window-local geometry (reliable). Elsewhere falls back to egui coords.
+pub fn is_hovering_shape(
+    shape_rect_logical: Rect,
+    scale: f32,
+    win_origin_logical: Pos2,
+) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        if let Some(v) = x11::is_cursor_over_shape(shape_rect_logical, scale) {
+            return v;
+        }
+    }
+    if let Some(screen_px) = global_cursor_screen_pos() {
+        let logical = Pos2::new(screen_px.x / scale, screen_px.y / scale);
+        return is_cursor_inside_shape(logical, win_origin_logical, shape_rect_logical);
+    }
+    false
+}
+
 /// Cross-platform overlay facade used by the app each frame.
 pub struct Overlay {
     #[cfg(windows)]
@@ -47,11 +83,18 @@ impl Overlay {
         let _ = frame;
     }
 
-    pub fn set_hit_rect(&mut self, shape_rect: Rect, scale_factor: f32) {
+    pub fn set_hit_rect(
+        &mut self,
+        shape_rect: Rect,
+        scale_factor: f32,
+        capture_full_window: bool,
+        window_size: egui::Vec2,
+    ) {
         #[cfg(target_os = "linux")]
-        self.inner.set_hit_rect(shape_rect, scale_factor);
+        self.inner
+            .set_hit_rect(shape_rect, scale_factor, capture_full_window, window_size);
         #[cfg(not(target_os = "linux"))]
-        let _ = (shape_rect, scale_factor);
+        let _ = (shape_rect, scale_factor, capture_full_window, window_size);
     }
 
     pub fn update_mouse_passthrough(

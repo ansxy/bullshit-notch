@@ -3,9 +3,64 @@
 //! // ponytail: Wayland cannot position globally or report global cursor.
 //! Force winit X11 backend and set XShape **input** region to the notch hit rect.
 //! Native Wayland layer-shell is the upgrade path.
+//!
+//! While the notch is open we expand the input region to the **full window** so the
+//! event loop still receives mouse-leave. Shaping only the pill while open leaves a
+//! stale egui hover_pos and the panel sticks forever.
 
-use egui::Rect;
+use egui::{Pos2, Rect};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+/// Physical-pixel cursor via `XQueryPointer`.
+pub fn global_cursor_screen_pos() -> Option<Pos2> {
+    #[cfg(target_os = "linux")]
+    {
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::ConnectionExt;
+        let (conn, screen_num) = connect().ok()?;
+        let root = conn.setup().roots[screen_num].root;
+        let reply = conn.query_pointer(root).ok()?.reply().ok()?;
+        return Some(Pos2::new(reply.root_x as f32, reply.root_y as f32));
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+/// Cursor over shape using window-local coords from `query_pointer(window)`.
+pub fn is_cursor_over_shape(shape_logical: Rect, scale: f32) -> Option<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        use x11rb::protocol::xproto::ConnectionExt;
+
+        let xid = LAST_XID.with(|c| c.get())?;
+        if !shape_logical.is_finite() || shape_logical.width() <= 0.0 || shape_logical.height() <= 0.0
+        {
+            return Some(false);
+        }
+
+        let (conn, _) = connect().ok()?;
+        let reply = conn.query_pointer(xid).ok()?.reply().ok()?;
+        if !reply.same_screen {
+            return Some(false);
+        }
+        let local_x = reply.win_x as f32;
+        let local_y = reply.win_y as f32;
+
+        let hit = shape_logical.expand(4.0);
+        let x0 = hit.min.x * scale;
+        let y0 = hit.min.y * scale;
+        let x1 = hit.max.x * scale;
+        let y1 = hit.max.y * scale;
+        return Some(local_x >= x0 && local_x < x1 && local_y >= y0 && local_y < y1);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (shape_logical, scale);
+        None
+    }
+}
 
 #[derive(Default)]
 pub struct OverlayWindowController {
@@ -26,6 +81,8 @@ impl OverlayWindowController {
                     eprintln!("x11 dock hints: {e}");
                 }
                 self.configured = true;
+            } else {
+                eprintln!("x11: no Xlib/Xcb window handle — is WINIT_UNIX_BACKEND=x11 set?");
             }
         }
         #[cfg(not(target_os = "linux"))]
@@ -35,15 +92,32 @@ impl OverlayWindowController {
         }
     }
 
-    /// Restrict pointer input to `shape_rect.expand(4.0)` via XShape.
-    pub fn set_hit_rect(&mut self, shape_rect_logical: Rect, scale_factor: f32) {
+    /// `capture_full_window`: while open, take input on the whole client area so leave works.
+    pub fn set_hit_rect(
+        &mut self,
+        shape_rect_logical: Rect,
+        scale_factor: f32,
+        capture_full_window: bool,
+        window_size_logical: egui::Vec2,
+    ) {
         #[cfg(target_os = "linux")]
         {
-            let hit = shape_rect_logical.expand(4.0);
-            let x = (hit.min.x * scale_factor).round() as i16;
-            let y = (hit.min.y * scale_factor).round() as i16;
-            let w = (hit.width() * scale_factor).round().max(1.0) as u16;
-            let h = (hit.height() * scale_factor).round().max(1.0) as u16;
+            let (x, y, w, h) = if capture_full_window {
+                (
+                    0_i16,
+                    0_i16,
+                    (window_size_logical.x * scale_factor).round().max(1.0) as u16,
+                    (window_size_logical.y * scale_factor).round().max(1.0) as u16,
+                )
+            } else {
+                let hit = shape_rect_logical.expand(4.0);
+                (
+                    (hit.min.x * scale_factor).round() as i16,
+                    (hit.min.y * scale_factor).round() as i16,
+                    (hit.width() * scale_factor).round().max(1.0) as u16,
+                    (hit.height() * scale_factor).round().max(1.0) as u16,
+                )
+            };
             let key = (x, y, w, h);
             if self.last_hit == Some(key) {
                 return;
@@ -58,7 +132,12 @@ impl OverlayWindowController {
         }
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = (shape_rect_logical, scale_factor);
+            let _ = (
+                shape_rect_logical,
+                scale_factor,
+                capture_full_window,
+                window_size_logical,
+            );
         }
     }
 
@@ -86,7 +165,10 @@ fn xwindow_from_frame(frame: &eframe::Frame) -> Option<u32> {
             LAST_XID.with(|c| c.set(Some(xid)));
             Some(xid)
         }
-        _ => None,
+        other => {
+            eprintln!("x11: unexpected window handle {other:?}");
+            None
+        }
     }
 }
 
@@ -139,8 +221,6 @@ fn set_input_shape(xid: u32, x: i16, y: i16, w: u16, h: u16) -> Result<(), Strin
     use x11rb::protocol::xproto::{ClipOrdering, Rectangle};
 
     let (conn, _) = connect()?;
-    let win = xid;
-
     let rect = Rectangle {
         x,
         y,
@@ -151,7 +231,7 @@ fn set_input_shape(xid: u32, x: i16, y: i16, w: u16, h: u16) -> Result<(), Strin
         shape::SO::SET,
         SK::INPUT,
         ClipOrdering::UNSORTED,
-        win,
+        xid,
         0,
         0,
         &[rect],

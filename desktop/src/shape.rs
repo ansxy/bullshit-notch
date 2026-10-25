@@ -205,7 +205,18 @@ impl Spring {
         let accel = -2.0 * zeta * omega * self.vel - omega * omega * (self.pos - self.target);
         self.vel += accel * dt;
         self.pos += self.vel * dt;
-        self.vel.abs() >= 0.5 || (self.target - self.pos).abs() >= 0.5
+        // Snap early — residual underdamped energy was rare large↔small flicker.
+        if (self.pos - self.target).abs() < 0.04 && self.vel.abs() < 0.55 {
+            self.pos = self.target;
+            self.vel = 0.0;
+        }
+        self.pos = self.pos.clamp(0.0, 1.0);
+        if self.pos == 0.0 || self.pos == 1.0 {
+            if (self.pos == 0.0 && self.vel < 0.0) || (self.pos == 1.0 && self.vel > 0.0) {
+                self.vel = 0.0;
+            }
+        }
+        self.vel.abs() >= 0.04 || (self.target - self.pos).abs() >= 0.015
     }
 }
 
@@ -234,21 +245,35 @@ mod tests {
     }
 
     #[test]
-    fn underdamped_open_spring_overshoots_and_settles() {
+    fn spring_opens_and_settles_without_chatter() {
         let mut s = Spring {
             pos: 0.0,
             vel: 0.0,
             target: 1.0,
         };
-        let mut max_seen = 0.0_f32;
         for _ in 0..120 {
-            s.step(1.0 / 60.0, 0.45, 0.62);
-            max_seen = max_seen.max(s.pos);
+            s.step(1.0 / 60.0, 0.45, 0.78);
         }
-        assert!(
-            max_seen > 1.02,
-            "open spring should overshoot slightly like liquid, max={max_seen}"
-        );
         assert!((s.pos - 1.0).abs() < 0.01);
+        assert!(s.vel.abs() < 0.05);
+    }
+
+    #[test]
+    fn spring_closes_and_stays_shut() {
+        let mut s = Spring {
+            pos: 1.0,
+            vel: 0.0,
+            target: 0.0,
+        };
+        let mut reopened = false;
+        for i in 0..180 {
+            s.step(1.0 / 60.0, 0.45, 0.78);
+            if i > 60 && s.pos > 0.08 {
+                reopened = true;
+            }
+        }
+        assert!(!reopened, "close must not bounce back open, pos={}", s.pos);
+        assert!(s.pos < 0.02);
+        assert!(s.vel.abs() < 0.05);
     }
 }

@@ -248,8 +248,9 @@ fn libc_kill(pid: i32, sig: i32) -> i32 {
 fn windows_pid_alive(pid: u32) -> bool {
     use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::System::Threading::{
-        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, STILL_ACTIVE,
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
+    const STILL_ACTIVE: u32 = 259;
     unsafe {
         let Ok(handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
             return false;
@@ -257,7 +258,7 @@ fn windows_pid_alive(pid: u32) -> bool {
         let mut code = 0u32;
         let ok = GetExitCodeProcess(handle, &mut code).is_ok();
         let _ = CloseHandle(handle);
-        ok && code == STILL_ACTIVE.0 as u32
+        ok && code == STILL_ACTIVE
     }
 }
 

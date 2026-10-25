@@ -92,6 +92,7 @@ impl Fire {
         let rows = Self::ROWS;
 
         for c in 0..cols {
+            // Match macOS Doom fire edge taper (Sources/Agents.swift).
             let edge_dist = c.min(cols - 1 - c);
             let taper = if edge_dist < 5 {
                 (5 - edge_dist) as i32
@@ -350,12 +351,17 @@ impl Fire {
         }
     }
 
+    /// Premultiplied RGBA (matches macOS `Fire.image` bitmap) for softer edges.
     pub fn render_rgba(&self, style: AgentAnimationStyle, buf: &mut [u8; Self::COLS * Self::DRAW_ROWS * 4]) {
         for row in 0..Self::DRAW_ROWS {
             for col in 0..Self::COLS {
                 let i = (row * Self::COLS + col) * 4;
-                if let Some(px) = self.color(row, col, style) {
-                    buf[i..i + 4].copy_from_slice(&px);
+                if let Some([r, g, b, a]) = self.color(row, col, style) {
+                    let af = a as u16;
+                    buf[i] = ((r as u16 * af) / 255) as u8;
+                    buf[i + 1] = ((g as u16 * af) / 255) as u8;
+                    buf[i + 2] = ((b as u16 * af) / 255) as u8;
+                    buf[i + 3] = a;
                 } else {
                     buf[i..i + 4].copy_from_slice(&[0, 0, 0, 0]);
                 }
