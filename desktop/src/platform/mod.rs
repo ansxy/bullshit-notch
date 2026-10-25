@@ -1,3 +1,4 @@
+pub mod http;
 pub mod process;
 
 #[cfg(windows)]
@@ -36,11 +37,7 @@ pub fn global_cursor_screen_pos() -> Option<Pos2> {
 
 /// Best-effort "is cursor over the notch shape?" for open/close.
 /// Linux uses X11 window-local geometry (reliable). Elsewhere falls back to egui coords.
-pub fn is_hovering_shape(
-    shape_rect_logical: Rect,
-    scale: f32,
-    win_origin_logical: Pos2,
-) -> bool {
+pub fn is_hovering_shape(shape_rect_logical: Rect, scale: f32, win_origin_logical: Pos2) -> bool {
     #[cfg(target_os = "linux")]
     {
         if let Some(v) = x11::is_cursor_over_shape(shape_rect_logical, scale) {

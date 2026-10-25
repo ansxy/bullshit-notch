@@ -53,53 +53,88 @@ pub fn draw_notch(ctx: &egui::Context, v: &View) -> (Rect, Vec<Action>) {
     let closed_h = 30.0 + prefs.height_adjust;
     let height = closed_h + (OPEN_H - closed_h) * t;
 
-    let rect = Rect::from_center_size(Pos2::new(screen.center().x, height * 0.5), Vec2::new(width, height));
+    let rect = Rect::from_center_size(
+        Pos2::new(screen.center().x, height * 0.5),
+        Vec2::new(width, height),
+    );
 
-    egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
-        let painter = ui.painter().clone();
-        let pts = shape.sample_points(rect, 20);
-        if pts.len() >= 3 {
-            painter.add(Shape::convex_polygon(pts.clone(), Color32::from_rgb(8, 8, 10), Stroke::NONE));
+    egui::CentralPanel::default()
+        .frame(egui::Frame::none())
+        .show(ctx, |ui| {
+            let painter = ui.painter().clone();
+            let pts = shape.sample_points(rect, 20);
+            if pts.len() >= 3 {
+                painter.add(Shape::convex_polygon(
+                    pts.clone(),
+                    Color32::from_rgb(8, 8, 10),
+                    Stroke::NONE,
+                ));
 
-            // Fire clipped to notch path (== macOS `.clipShape(NotchShape)`).
-            if v.burning && t < 0.35 {
-                if let Some(tex) = v.fire_tex {
-                    let [r, g, b, _] = v.fire_accent;
-                    let wash = Color32::from_rgba_unmultiplied(r, g, b, 70);
-                    painter.add(Shape::convex_polygon(pts.clone(), wash, Stroke::NONE));
-                    painter.add(Shape::mesh(textured_convex_mesh(tex.id(), &pts, rect, Color32::WHITE)));
+                // Fire clipped to notch path (== macOS `.clipShape(NotchShape)`).
+                if v.burning && t < 0.35 {
+                    if let Some(tex) = v.fire_tex {
+                        let [r, g, b, _] = v.fire_accent;
+                        let wash = Color32::from_rgba_unmultiplied(r, g, b, 70);
+                        painter.add(Shape::convex_polygon(pts.clone(), wash, Stroke::NONE));
+                        painter.add(Shape::mesh(textured_convex_mesh(
+                            tex.id(),
+                            &pts,
+                            rect,
+                            Color32::WHITE,
+                        )));
+                    }
                 }
-            }
 
-            if t > 0.05 {
-                let fade = ((t - 0.05) / 0.6).clamp(0.0, 1.0);
-                let music_pal = (prefs.music_ambient).then(|| v.music.active_palette()).flatten();
-                if let Some(pal) = music_pal {
-                    let level = prefs.music_ambient_intensity as f32 * if v.music.playing { 1.0 } else { 0.58 };
-                    painter.add(Shape::mesh(ambient_mesh(&pts, rect, &pal, level * fade, v.time)));
-                } else if let Some(acc) = wings::accent(v) {
-                    painter.add(Shape::mesh(glow_mesh(&pts, rect, acc, 0.22 * fade)));
+                if t > 0.05 {
+                    let fade = ((t - 0.05) / 0.6).clamp(0.0, 1.0);
+                    let music_pal = (prefs.music_ambient)
+                        .then(|| v.music.active_palette())
+                        .flatten();
+                    if let Some(pal) = music_pal {
+                        let level = prefs.music_ambient_intensity as f32
+                            * if v.music.playing { 1.0 } else { 0.58 };
+                        painter.add(Shape::mesh(ambient_mesh(
+                            &pts,
+                            rect,
+                            &pal,
+                            level * fade,
+                            v.time,
+                        )));
+                    } else if let Some(acc) = wings::accent(v) {
+                        painter.add(Shape::mesh(glow_mesh(&pts, rect, acc, 0.22 * fade)));
+                    }
                 }
+
+                painter.add(Shape::closed_line(
+                    pts.clone(),
+                    Stroke::new(
+                        1.0_f32,
+                        Color32::from_white_alpha(if t > 0.5 { 40 } else { 22 }),
+                    ),
+                ));
             }
 
-            painter.add(Shape::closed_line(pts.clone(), Stroke::new(1.0_f32, Color32::from_white_alpha(if t > 0.5 { 40 } else { 22 }))));
-        }
-
-        if t < 0.35 {
-            let inner = Rect::from_min_max(
-                Pos2::new(rect.min.x + shape.flare, rect.min.y),
-                Pos2::new(rect.max.x - shape.flare, rect.max.y),
-            );
-            wings::draw(&painter, v, inner);
-            if !v.burning && wings::activity(v) == wings::Activity::None {
-                painter.text(rect.center(), egui::Align2::CENTER_CENTER, "bullshit", egui::FontId::proportional(11.0), Color32::from_gray(120));
+            if t < 0.35 {
+                let inner = Rect::from_min_max(
+                    Pos2::new(rect.min.x + shape.flare, rect.min.y),
+                    Pos2::new(rect.max.x - shape.flare, rect.max.y),
+                );
+                wings::draw(&painter, v, inner);
+                if !v.burning && wings::activity(v) == wings::Activity::None {
+                    painter.text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "bullshit",
+                        egui::FontId::proportional(11.0),
+                        Color32::from_gray(120),
+                    );
+                }
+            } else {
+                draw_expanded(ui, rect, &shape, v, &mut actions);
             }
-        } else {
-            draw_expanded(ui, rect, &shape, v, &mut actions);
-        }
 
-        let _ = ui.allocate_rect(rect.expand(4.0), Sense::hover());
-    });
+            let _ = ui.allocate_rect(rect.expand(4.0), Sense::hover());
+        });
 
     (rect, actions)
 }
@@ -110,11 +145,19 @@ fn textured_convex_mesh(tex: TextureId, pts: &[Pos2], rect: Rect, tint: Color32)
     let w = rect.width().max(1.0);
     let h = rect.height().max(1.0);
     for p in pts {
-        let uv = Pos2::new(((p.x - rect.min.x) / w).clamp(0.0, 1.0), ((p.y - rect.min.y) / h).clamp(0.0, 1.0));
-        mesh.vertices.push(Vertex { pos: *p, uv, color: tint });
+        let uv = Pos2::new(
+            ((p.x - rect.min.x) / w).clamp(0.0, 1.0),
+            ((p.y - rect.min.y) / h).clamp(0.0, 1.0),
+        );
+        mesh.vertices.push(Vertex {
+            pos: *p,
+            uv,
+            color: tint,
+        });
     }
     for i in 1..pts.len().saturating_sub(1) {
-        mesh.indices.extend_from_slice(&[0, i as u32, (i + 1) as u32]);
+        mesh.indices
+            .extend_from_slice(&[0, i as u32, (i + 1) as u32]);
     }
     mesh
 }
@@ -175,8 +218,18 @@ fn ambient_mesh(pts: &[Pos2], rect: Rect, pal: &Palette, level: f32, time: f64) 
         )
     };
     let blobs = [
-        (pal.primary, 0.34, at(0.14, 0.88, 0.22, 0.55), 270.0 + 70.0 * breathe),
-        (pal.secondary, 0.30, at(0.86, 0.46, 0.78, 0.86), 260.0 + 60.0 * breathe),
+        (
+            pal.primary,
+            0.34,
+            at(0.14, 0.88, 0.22, 0.55),
+            270.0 + 70.0 * breathe,
+        ),
+        (
+            pal.secondary,
+            0.30,
+            at(0.86, 0.46, 0.78, 0.86),
+            260.0 + 60.0 * breathe,
+        ),
         (pal.tertiary, 0.24, at(0.48, 0.72, 0.52, 0.96), 240.0),
     ];
     let top = rect.min.y;
@@ -203,7 +256,13 @@ fn ambient_mesh(pts: &[Pos2], rect: Rect, pal: &Palette, level: f32, time: f64) 
     })
 }
 
-fn draw_expanded(ui: &mut egui::Ui, rect: Rect, shape: &NotchShape, v: &View, _actions: &mut Vec<Action>) {
+fn draw_expanded(
+    ui: &mut egui::Ui,
+    rect: Rect,
+    shape: &NotchShape,
+    v: &View,
+    _actions: &mut Vec<Action>,
+) {
     let pad_x = shape.flare + 10.0;
     let pad_top = shape.flare_depth + 10.0;
     let pad_bot = shape.bottom + 8.0;
@@ -217,36 +276,67 @@ fn draw_expanded(ui: &mut egui::Ui, rect: Rect, shape: &NotchShape, v: &View, _a
         ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
         ui.vertical(|ui| {
             ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("Agents").color(Color32::WHITE).size(13.0).strong());
+                ui.label(
+                    egui::RichText::new("Agents")
+                        .color(Color32::WHITE)
+                        .size(13.0)
+                        .strong(),
+                );
                 ui.add_space(6.0);
-                ui.label(egui::RichText::new(format!("{} busy", snap.busy_count())).color(Color32::from_rgb(255, 160, 60)).size(11.0));
+                ui.label(
+                    egui::RichText::new(format!("{} busy", snap.busy_count()))
+                        .color(Color32::from_rgb(255, 160, 60))
+                        .size(11.0),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(egui::RichText::new(format!("{} sessions", snap.agents.len())).color(Color32::from_gray(130)).size(10.0));
+                    ui.label(
+                        egui::RichText::new(format!("{} sessions", snap.agents.len()))
+                            .color(Color32::from_gray(130))
+                            .size(10.0),
+                    );
                 });
             });
             ui.add_space(8.0);
-            egui::ScrollArea::vertical().max_height((inner.height() - 36.0).max(40.0)).show(ui, |ui| {
-                if snap.agents.is_empty() {
-                    ui.label(egui::RichText::new("No live Claude sessions").color(Color32::from_gray(140)).size(12.0));
-                }
-                for agent in &snap.agents {
-                    agent_row(ui, agent, snap, v.face_frame);
-                    ui.add_space(2.0);
-                    ui.separator();
-                    ui.add_space(2.0);
-                }
-            });
+            egui::ScrollArea::vertical()
+                .max_height((inner.height() - 36.0).max(40.0))
+                .show(ui, |ui| {
+                    if snap.agents.is_empty() {
+                        ui.label(
+                            egui::RichText::new("No live Claude sessions")
+                                .color(Color32::from_gray(140))
+                                .size(12.0),
+                        );
+                    }
+                    for agent in &snap.agents {
+                        agent_row(ui, agent, snap, v.face_frame);
+                        ui.add_space(2.0);
+                        ui.separator();
+                        ui.add_space(2.0);
+                    }
+                });
         });
     });
 }
 
 fn agent_row(ui: &mut egui::Ui, agent: &Agent, snap: &AgentSnapshot, face_frame: usize) {
     let face = Agent::face(agent.status.as_deref(), face_frame);
-    let title = agent.name.clone().unwrap_or_else(|| agent.session_id.clone());
-    let tokens = snap.tokens.get(&agent.session_id).copied().unwrap_or((0, 0));
+    let title = agent
+        .name
+        .clone()
+        .unwrap_or_else(|| agent.session_id.clone());
+    let tokens = snap
+        .tokens
+        .get(&agent.session_id)
+        .copied()
+        .unwrap_or((0, 0));
     ui.horizontal(|ui| {
         ui.add_space(2.0);
-        ui.label(egui::RichText::new(face).monospace().color(Color32::from_rgb(255, 180, 80)).size(12.0));
+        ui.label(
+            egui::RichText::new(face)
+                .monospace()
+                .color(Color32::from_rgb(255, 180, 80))
+                .size(12.0),
+        );
         ui.add_space(6.0);
         ui.vertical(|ui| {
             ui.label(egui::RichText::new(title).color(Color32::WHITE).size(12.0));

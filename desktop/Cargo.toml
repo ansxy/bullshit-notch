@@ -17,17 +17,31 @@ raw-window-handle = "0.6"
 winit = { version = "0.30.5", default-features = false, features = ["rwh_06", "x11"] }
 
 [target.'cfg(windows)'.dependencies]
+ureq = { version = "2", default-features = false, features = ["native-tls", "json"] }
+native-tls = "0.2"
 windows = { version = "0.58", features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Media_Control",
+    "Storage_Streams",
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_Threading",
     "Win32_System_Power",
+    "Win32_System_Com",
+    "Win32_System_WinRT",
+    "Win32_Media_Audio",
+    "Win32_Media_Audio_Endpoints",
     "Win32_Graphics_Gdi",
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 x11rb = { version = "0.13", features = ["shape"] }
+zbus = "4"
+
+[target.'cfg(not(windows))'.dependencies]
+ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 
 [profile.release]
 opt-level = 3

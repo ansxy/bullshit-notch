@@ -35,7 +35,9 @@ pub fn is_cursor_over_shape(shape_logical: Rect, scale: f32) -> Option<bool> {
         use x11rb::protocol::xproto::ConnectionExt;
 
         let xid = LAST_XID.with(|c| c.get())?;
-        if !shape_logical.is_finite() || shape_logical.width() <= 0.0 || shape_logical.height() <= 0.0
+        if !shape_logical.is_finite()
+            || shape_logical.width() <= 0.0
+            || shape_logical.height() <= 0.0
         {
             return Some(false);
         }
@@ -242,10 +244,7 @@ fn set_input_shape(xid: u32, x: i16, y: i16, w: u16, h: u16) -> Result<(), Strin
 }
 
 #[cfg(target_os = "linux")]
-fn intern(
-    conn: &x11rb::rust_connection::RustConnection,
-    name: &str,
-) -> Result<u32, String> {
+fn intern(conn: &x11rb::rust_connection::RustConnection, name: &str) -> Result<u32, String> {
     use x11rb::protocol::xproto::ConnectionExt;
     let cookie = conn
         .intern_atom(false, name.as_bytes())

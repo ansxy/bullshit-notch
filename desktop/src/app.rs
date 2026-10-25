@@ -138,10 +138,14 @@ impl BullshitNotchApp {
         if self.pinned_top {
             return;
         }
-        let mon = ctx.input(|i| i.viewport().monitor_size).unwrap_or(egui::vec2(1920.0, 1080.0));
+        let mon = ctx
+            .input(|i| i.viewport().monitor_size)
+            .unwrap_or(egui::vec2(1920.0, 1080.0));
         let x = ((mon.x - WINDOW_W) * 0.5).max(0.0);
         ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, 0.0)));
-        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(WINDOW_W, WINDOW_H)));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+            WINDOW_W, WINDOW_H,
+        )));
         self.pinned_top = true;
     }
 }
@@ -192,9 +196,7 @@ impl eframe::App for BullshitNotchApp {
             self.reopen_armed = true;
         }
 
-        let want_open = self.prefs.open_on_hover
-            && hovering
-            && (already_open || self.reopen_armed);
+        let want_open = self.prefs.open_on_hover && hovering && (already_open || self.reopen_armed);
         self.open_spring.target = if want_open { 1.0 } else { 0.0 };
         let dt = ctx.input(|i| i.stable_dt).clamp(1.0 / 120.0, 0.05);
         // Higher damping — close must not bounce.
@@ -231,20 +233,14 @@ impl eframe::App for BullshitNotchApp {
 
         if burning {
             let mut buf = [0u8; Fire::COLS * Fire::DRAW_ROWS * 4];
-            self.fire
-                .render_rgba(self.prefs.agent_animation, &mut buf);
-            let color = egui::ColorImage::from_rgba_premultiplied(
-                [Fire::COLS, Fire::DRAW_ROWS],
-                &buf,
-            );
+            self.fire.render_rgba(self.prefs.agent_animation, &mut buf);
+            let color =
+                egui::ColorImage::from_rgba_premultiplied([Fire::COLS, Fire::DRAW_ROWS], &buf);
             match &mut self.fire_texture {
                 Some(tex) => tex.set(color, egui::TextureOptions::NEAREST),
                 None => {
-                    self.fire_texture = Some(ctx.load_texture(
-                        "fire",
-                        color,
-                        egui::TextureOptions::NEAREST,
-                    ));
+                    self.fire_texture =
+                        Some(ctx.load_texture("fire", color, egui::TextureOptions::NEAREST));
                 }
             }
         }
@@ -286,15 +282,13 @@ impl eframe::App for BullshitNotchApp {
             .set_hit_rect(shape_rect, scale, capture_full, win_size);
 
         let wants_keyboard = ctx.memory(|m| m.focused().is_some());
-        let _ = self.overlay.update_mouse_passthrough(
-            shape_rect,
-            scale,
-            win_origin,
-            wants_keyboard,
-        );
+        let _ =
+            self.overlay
+                .update_mouse_passthrough(shape_rect, scale, win_origin, wants_keyboard);
 
         // HUD/charger pills expire on a timer; keep ticking so they disappear on time.
-        let delay = compute_repaint_delay(expanded, spring_moving || transient, burning, music.playing);
+        let delay =
+            compute_repaint_delay(expanded, spring_moving || transient, burning, music.playing);
         ctx.request_repaint_after(delay);
     }
 }
@@ -304,7 +298,8 @@ impl BullshitNotchApp {
     fn sync_artwork(&mut self, ctx: &egui::Context, music: &NowPlayingSnapshot) {
         match &music.artwork {
             Some(img) if self.art_tex.as_ref().map(|(k, _)| k) != Some(&music.art_key) => {
-                let tex = ctx.load_texture("artwork", (**img).clone(), egui::TextureOptions::LINEAR);
+                let tex =
+                    ctx.load_texture("artwork", (**img).clone(), egui::TextureOptions::LINEAR);
                 self.art_tex = Some((music.art_key.clone(), tex));
             }
             None => self.art_tex = None,

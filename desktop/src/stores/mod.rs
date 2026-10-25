@@ -36,40 +36,45 @@ pub fn fixed<T: Send + Sync + 'static>(v: T) -> watch::Receiver<T> {
     rx
 }
 
-/// Run `poll` on a worker thread every `every`, publishing changed values and waking egui.
+/// Build a poll fn on a worker thread (`make` runs there, so COM/D-Bus handles need not be
+/// `Send`), then run it every `every`, publishing changed values and waking egui.
 /// Stops when the receiver side is dropped.
-pub fn spawn_poller<T, F>(
+pub fn spawn_poller<T, M, F>(
     ctx: egui::Context,
     name: &str,
     every: Duration,
     init: T,
-    mut poll: F,
+    make: M,
 ) -> watch::Receiver<T>
 where
     T: PartialEq + Send + Sync + 'static,
-    F: FnMut() -> Option<T> + Send + 'static,
+    M: FnOnce() -> F + Send + 'static,
+    F: FnMut() -> Option<T>,
 {
     let (tx, rx) = watch::channel(init);
     let _ = std::thread::Builder::new()
         .name(name.to_string())
-        .spawn(move || loop {
-            if let Some(next) = poll() {
-                let changed = tx.send_if_modified(|cur| {
-                    if *cur != next {
-                        *cur = next;
-                        true
-                    } else {
-                        false
+        .spawn(move || {
+            let mut poll = make();
+            loop {
+                if let Some(next) = poll() {
+                    let changed = tx.send_if_modified(|cur| {
+                        if *cur != next {
+                            *cur = next;
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                    if changed {
+                        ctx.request_repaint();
                     }
-                });
-                if changed {
-                    ctx.request_repaint();
                 }
+                if tx.is_closed() {
+                    break;
+                }
+                std::thread::sleep(every);
             }
-            if tx.is_closed() {
-                break;
-            }
-            std::thread::sleep(every);
         });
     rx
 }

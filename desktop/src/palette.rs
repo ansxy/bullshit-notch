@@ -97,7 +97,11 @@ fn make_vivid(bk: &Bucket, sat_floor: f32, bright_floor: f32, bright_ceil: f32) 
     let h = bk.hue().rem_euclid(1.0);
     let raw_s = bk.s / bk.weight;
     let raw_b = bk.b / bk.weight;
-    let s = if raw_s < 0.08 { 0.35 } else { (raw_s * 1.25).max(sat_floor).min(0.96) };
+    let s = if raw_s < 0.08 {
+        0.35
+    } else {
+        (raw_s * 1.25).max(sat_floor).min(0.96)
+    };
     let b = (raw_b * 1.15).max(bright_floor).min(bright_ceil);
     (h, s, b)
 }
@@ -132,7 +136,11 @@ pub fn extract(rgba: &[u8], width: usize, height: usize) -> Palette {
         }
     }
     let mut ranked: Vec<Bucket> = bins.iter().copied().filter(|b| b.weight > 0.0).collect();
-    ranked.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
+    ranked.sort_by(|a, b| {
+        b.weight
+            .partial_cmp(&a.weight)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let Some(first) = ranked.first().copied() else {
         return Palette::fallback();
     };
@@ -160,7 +168,11 @@ pub fn extract(rgba: &[u8], width: usize, height: usize) -> Palette {
             let (h, s, b) = make_vivid(bk, 0.58, 0.62, 0.88);
             hsb(h, s, b)
         }
-        None => hsb((p1.0 + 0.86).rem_euclid(1.0), (p1.1 * 0.9).clamp(0.55, 0.90), 0.75),
+        None => hsb(
+            (p1.0 + 0.86).rem_euclid(1.0),
+            (p1.1 * 0.9).clamp(0.55, 0.90),
+            0.75,
+        ),
     };
     Palette {
         primary: hsb(p1.0, p1.1, p1.2),
@@ -188,7 +200,12 @@ pub fn downscale_image_rgba(bytes: &[u8], max: u32) -> Option<egui::ColorImage> 
 pub fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
     let t = t.clamp(0.0, 1.0);
     let l = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * t) as u8;
-    Color32::from_rgba_unmultiplied(l(a.r(), b.r()), l(a.g(), b.g()), l(a.b(), b.b()), l(a.a(), b.a()))
+    Color32::from_rgba_unmultiplied(
+        l(a.r(), b.r()),
+        l(a.g(), b.g()),
+        l(a.b(), b.b()),
+        l(a.a(), b.a()),
+    )
 }
 
 #[cfg(test)]
@@ -208,7 +225,11 @@ mod tests {
             px.extend_from_slice(&[230, 30, 40, 255]);
         }
         let p = extract(&px, 32, 32);
-        assert!(p.primary.r() > 180 && p.primary.g() < 120, "{:?}", p.primary);
+        assert!(
+            p.primary.r() > 180 && p.primary.g() < 120,
+            "{:?}",
+            p.primary
+        );
     }
 
     #[test]

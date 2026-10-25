@@ -232,13 +232,11 @@ impl Fire {
                 let w3 = ((nx + ny) * 0.85 + t * 1.15).sin();
                 let v = (w1 + w2 + w3) / 3.0;
                 let norm = v * 0.5 + 0.5;
-                let v_env =
-                    ((row + 1) as f64 / d_rows as f64).powf(0.45) * corner_mask;
+                let v_env = ((row + 1) as f64 / d_rows as f64).powf(0.45) * corner_mask;
                 if v_env <= 0.1 {
                     return None;
                 }
-                let hue =
-                    (0.52 + norm * 0.42 + self.steps as f64 * 0.003).rem_euclid(1.0) as f32;
+                let hue = (0.52 + norm * 0.42 + self.steps as f64 * 0.003).rem_euclid(1.0) as f32;
                 let sat = (0.75 + 0.22 * (norm * std::f64::consts::PI).sin()) as f32;
                 let bri = ((0.38 + 0.62 * norm) * v_env) as f32;
                 let rgb = hsb_to_rgb(hue, sat, bri.clamp(0.0, 1.0));
@@ -289,20 +287,20 @@ impl Fire {
                 if row < top_row {
                     let sparkle = (col * 53 + row * 97 + self.steps * 41) % 173;
                     if sparkle == 0 {
-                        let s_hue = (col as f64 / Self::COLS as f64 + t * 0.1).rem_euclid(1.0) as f32;
+                        let s_hue =
+                            (col as f64 / Self::COLS as f64 + t * 0.1).rem_euclid(1.0) as f32;
                         let rgb = hsb_to_rgb(s_hue, 0.35, 1.0);
                         return Some([rgb[0], rgb[1], rgb[2], 242]);
                     }
                     return None;
                 }
-                let hue = ((col as f64 / Self::COLS as f64) * 1.35
-                    - self.steps as f64 * 0.032
+                let hue = ((col as f64 / Self::COLS as f64) * 1.35 - self.steps as f64 * 0.032
                     + row as f64 * 0.02
                     + 10.0)
                     .rem_euclid(1.0) as f32;
                 let is_tip = row == top_row;
-                let v_bri = 0.55
-                    + 0.45 * ((row - top_row + 1) as f64 / (d_rows - top_row).max(1) as f64);
+                let v_bri =
+                    0.55 + 0.45 * ((row - top_row + 1) as f64 / (d_rows - top_row).max(1) as f64);
                 let rgb = hsb_to_rgb(
                     hue,
                     if is_tip { 0.30 } else { 0.92 },
@@ -322,14 +320,13 @@ impl Fire {
                 for lane in 0..3 {
                     let seed = row * 31 + lane * 67 + if dir > 0 { 13 } else { 29 };
                     let period = 22.0 + (seed % 11) as f64;
-                    let age = (self.steps as f64 + (seed % 29) as f64 * 1.7).rem_euclid(period)
-                        / period;
+                    let age =
+                        (self.steps as f64 + (seed % 29) as f64 * 1.7).rem_euclid(period) / period;
                     let star_dist = age.powi(2) * (center - 1.0);
                     let tail_len = (age * 14.0).max(1.5);
                     if dist_from_center <= star_dist && dist_from_center >= star_dist - tail_len {
                         let pos_in_streak = 1.0 - (star_dist - dist_from_center) / tail_len;
-                        let hue = (0.54 + (seed % 7) as f64 * 0.045
-                            - (1.0 - pos_in_streak) * 0.08)
+                        let hue = (0.54 + (seed % 7) as f64 * 0.045 - (1.0 - pos_in_streak) * 0.08)
                             .rem_euclid(1.0);
                         let is_head = pos_in_streak > 0.82;
                         let rgb = hsb_to_rgb(
@@ -352,7 +349,11 @@ impl Fire {
     }
 
     /// Premultiplied RGBA (matches macOS `Fire.image` bitmap) for softer edges.
-    pub fn render_rgba(&self, style: AgentAnimationStyle, buf: &mut [u8; Self::COLS * Self::DRAW_ROWS * 4]) {
+    pub fn render_rgba(
+        &self,
+        style: AgentAnimationStyle,
+        buf: &mut [u8; Self::COLS * Self::DRAW_ROWS * 4],
+    ) {
         for row in 0..Self::DRAW_ROWS {
             for col in 0..Self::COLS {
                 let i = (row * Self::COLS + col) * 4;

@@ -43,12 +43,7 @@ impl Agent {
 
     pub fn face(status: Option<&str>, frame: usize) -> &'static str {
         const BUSY: [&str; 6] = [
-            "[o_o]   ",
-            "[o_o].  ",
-            "[o_o].. ",
-            "[o_o]...",
-            "[-_o]...",
-            "[o_o]...",
+            "[o_o]   ", "[o_o].  ", "[o_o].. ", "[o_o]...", "[-_o]...", "[o_o]...",
         ];
         const WAITING: [&str; 2] = ["[O_O] ? ", "[O_O]   "];
         const IDLE: [&str; 3] = ["[-_-] z ", "[-_-] zZ", "[-_-] zZ"];
@@ -212,8 +207,9 @@ fn read_line(line: &[u8], entry: &mut Parsed) {
         .unwrap_or("anon")
         .to_string();
     let int = |k: &str| u.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
-    let input =
-        int("input_tokens") + int("cache_creation_input_tokens") + int("cache_read_input_tokens") / 10;
+    let input = int("input_tokens")
+        + int("cache_creation_input_tokens")
+        + int("cache_read_input_tokens") / 10;
     let output = int("output_tokens");
     entry.usage.insert(key, (input, output));
 }
@@ -269,10 +265,7 @@ fn slugify_cwd(cwd: &str) -> String {
 }
 
 /// Refresh Claude sessions from `~/.claude` (or provided root for tests).
-pub fn refresh_from_dirs(
-    claude_dir: &Path,
-    state: &mut AgentParseState,
-) -> AgentSnapshot {
+pub fn refresh_from_dirs(claude_dir: &Path, state: &mut AgentParseState) -> AgentSnapshot {
     let sessions_dir = claude_dir.join("sessions");
     let mut snap = AgentSnapshot::default();
     let Ok(entries) = fs::read_dir(&sessions_dir) else {
