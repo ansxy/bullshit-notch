@@ -8,8 +8,11 @@ use crate::stores::battery::BatterySnapshot;
 use crate::stores::hud::HudSnapshot;
 use crate::stores::now_playing::NowPlayingSnapshot;
 use crate::stores::agenda::AgendaSnapshot;
+use crate::stores::containers::ContainerSnapshot;
+use crate::stores::github::GithubSnapshot;
 use crate::stores::shelf::ShelfSnapshot;
 use crate::stores::usage::UsageSnapshot;
+use crate::stores::work::WorkSnapshot;
 use crate::ui;
 use eframe::egui;
 use std::path::PathBuf;
@@ -71,6 +74,9 @@ pub struct BullshitNotchApp {
     usage_rx: watch::Receiver<UsageSnapshot>,
     shelf_rx: watch::Receiver<ShelfSnapshot>,
     agenda_rx: watch::Receiver<AgendaSnapshot>,
+    github_rx: watch::Receiver<GithubSnapshot>,
+    work_rx: watch::Receiver<WorkSnapshot>,
+    containers_rx: watch::Receiver<ContainerSnapshot>,
     ui_state: ui::UiState,
     /// `--open`: keep the panel expanded (layout debugging / screenshots).
     pin_open: bool,
@@ -129,6 +135,9 @@ impl BullshitNotchApp {
         };
         let shelf_rx = crate::stores::shelf::spawn(demo);
         let agenda_rx = crate::stores::agenda::spawn(cc.egui_ctx.clone(), demo);
+        let github_rx = crate::stores::github::spawn(cc.egui_ctx.clone(), demo);
+        let work_rx = crate::stores::work::spawn(demo);
+        let containers_rx = crate::stores::containers::spawn(cc.egui_ctx.clone(), demo, prefs.container_cli);
 
         Self {
             music_rx,
@@ -139,6 +148,9 @@ impl BullshitNotchApp {
             usage_rx,
             shelf_rx,
             agenda_rx,
+            github_rx,
+            work_rx,
+            containers_rx,
             // Swift demo opens on the Claude filter to show the limits card.
             ui_state: ui::UiState { agent_filter: demo.then_some(Harness::Claude), ..Default::default() },
             pin_open: std::env::args().any(|a| a == "--open"),
@@ -281,6 +293,9 @@ impl eframe::App for BullshitNotchApp {
         let usage = self.usage_rx.borrow().clone();
         let shelf = self.shelf_rx.borrow().clone();
         let agenda = self.agenda_rx.borrow().clone();
+        let github = self.github_rx.borrow().clone();
+        let work = self.work_rx.borrow().clone();
+        let containers = self.containers_rx.borrow().clone();
         self.sync_artwork(ctx, &music);
 
         let view = ui::View {
@@ -292,6 +307,9 @@ impl eframe::App for BullshitNotchApp {
             usage: &usage,
             shelf: &shelf,
             agenda: &agenda,
+            github: &github,
+            work: &work,
+            containers: &containers,
             fire_tex: self.fire_texture.as_ref(),
             art_tex: self.art_tex.as_ref().map(|(_, t)| t),
             burning,
@@ -364,6 +382,27 @@ impl BullshitNotchApp {
             ui::Action::Reveal(path) => platform::process::reveal_path(&path),
             ui::Action::OpenPath(path) => platform::process::open_path(&path),
             ui::Action::OpenUrl(url) => platform::process::open_url(&url),
+            ui::Action::RefreshGit => crate::stores::github::refresh_now(),
+            ui::Action::RefreshContainers => crate::stores::containers::refresh_now(),
+            ui::Action::AddProject(name, path, agent) => crate::stores::work::add_project(name, path, agent),
+            ui::Action::RemoveProject(id) => crate::stores::work::remove_project(&id),
+            ui::Action::StartProject(id) => crate::stores::work::start_service(&id),
+            ui::Action::StopProject(id) => crate::stores::work::stop_service(&id),
+            ui::Action::LaunchTerm(id) => {
+                if let Some(p) = self.work_rx.borrow().projects.iter().find(|p| p.id == id) {
+                    crate::stores::work::launch_terminal(self.prefs.preferred_terminal, &p.expanded_path(), None);
+                }
+            }
+            ui::Action::LaunchAgent(id) => {
+                if let Some(p) = self.work_rx.borrow().projects.iter().find(|p| p.id == id) {
+                    crate::stores::work::launch_terminal(
+                        self.prefs.preferred_terminal,
+                        &p.expanded_path(),
+                        Some(&p.agent_command),
+                    );
+                }
+            }
+            ui::Action::ContainerCmd(cli, id, verb) => crate::stores::containers::container_action(&cli, &id, &verb),
         }
     }
 }

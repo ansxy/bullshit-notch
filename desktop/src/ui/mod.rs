@@ -2,6 +2,7 @@ pub mod agents;
 pub mod home;
 pub mod shelf;
 pub mod wings;
+pub mod workspace;
 
 use crate::config::Prefs;
 use crate::palette::Palette;
@@ -11,8 +12,11 @@ use crate::stores::agents::{AgentSnapshot, Harness};
 use crate::stores::battery::BatterySnapshot;
 use crate::stores::hud::HudSnapshot;
 use crate::stores::now_playing::{MediaCommand, NowPlayingSnapshot};
+use crate::stores::containers::ContainerSnapshot;
+use crate::stores::github::{GithubSnapshot, PrList};
 use crate::stores::shelf::ShelfSnapshot;
 use crate::stores::usage::UsageSnapshot;
+use crate::stores::work::WorkSnapshot;
 use eframe::egui::{self, Color32, Mesh, Pos2, Rect, Sense, Shape, Stroke, TextureId, Vec2};
 use eframe::epaint::Vertex;
 
@@ -26,6 +30,9 @@ pub struct View<'a> {
     pub usage: &'a UsageSnapshot,
     pub shelf: &'a ShelfSnapshot,
     pub agenda: &'a AgendaSnapshot,
+    pub github: &'a GithubSnapshot,
+    pub work: &'a WorkSnapshot,
+    pub containers: &'a ContainerSnapshot,
     pub fire_tex: Option<&'a egui::TextureHandle>,
     pub art_tex: Option<&'a egui::TextureHandle>,
     pub burning: bool,
@@ -50,6 +57,15 @@ pub enum Action {
     Reveal(std::path::PathBuf),
     OpenPath(std::path::PathBuf),
     OpenUrl(String),
+    RefreshGit,
+    RefreshContainers,
+    AddProject(String, String, String),
+    RemoveProject(String),
+    StartProject(String),
+    StopProject(String),
+    LaunchTerm(String),
+    LaunchAgent(String),
+    ContainerCmd(String, String, String),
 }
 
 /// Panel UI state that survives frames (not persisted).
@@ -67,6 +83,10 @@ pub struct UiState {
     pub agent_filter: Option<Harness>,
     pub show_daily: Vec<Harness>,
     pub custom_limits: Option<(Harness, String, String)>,
+    pub work_section: workspace::WorkSection,
+    pub pr_list: PrList,
+    pub new_project_name: String,
+    pub new_project_path: String,
 }
 
 /// Rounded translucent card (`NotchCardBackground`).
@@ -340,7 +360,7 @@ fn draw_expanded(
         match st.tab {
             NotchTab::Home if v.prefs.tab_home => home::show(ui, v, actions),
             NotchTab::Shelf if v.prefs.tab_shelf => shelf::show(ui, v, actions),
-            NotchTab::Workspace if v.prefs.tab_topbar => agents::show(ui, v, st, actions),
+            NotchTab::Workspace if v.prefs.tab_topbar => workspace::show(ui, v, st, actions),
             _ => {
                 // Hidden tab still selected — fall back to first enabled.
                 if v.prefs.tab_home {
@@ -348,7 +368,7 @@ fn draw_expanded(
                 } else if v.prefs.tab_shelf {
                     shelf::show(ui, v, actions);
                 } else {
-                    agents::show(ui, v, st, actions);
+                    workspace::show(ui, v, st, actions);
                 }
             }
         }

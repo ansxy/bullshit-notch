@@ -2,10 +2,13 @@ pub mod agents;
 pub mod agenda;
 pub mod antigravity;
 pub mod battery;
+pub mod containers;
+pub mod github;
 pub mod hud;
 pub mod now_playing;
 pub mod shelf;
 pub mod usage;
+pub mod work;
 
 use std::time::Duration;
 use tokio::sync::watch;
