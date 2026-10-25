@@ -1,7 +1,9 @@
 pub mod agents;
+pub mod antigravity;
 pub mod battery;
 pub mod hud;
 pub mod now_playing;
+pub mod usage;
 
 use std::time::Duration;
 use tokio::sync::watch;

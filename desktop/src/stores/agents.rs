@@ -14,10 +14,45 @@ pub enum Harness {
 }
 
 impl Harness {
+    pub const ALL: [Harness; 2] = [Harness::Claude, Harness::Antigravity];
+
     pub fn tag(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Antigravity => "agy",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude",
+            Self::Antigravity => "Antigravity",
+        }
+    }
+
+    /// Matches `Harness.color` in Swift.
+    pub fn color(self) -> egui::Color32 {
+        match self {
+            Self::Claude => egui::Color32::from_rgb(255, 149, 0),
+            Self::Antigravity => egui::Color32::from_rgb(50, 215, 230),
+        }
+    }
+
+    /// (title, 5h limit, weekly limit) in effective tokens.
+    pub fn limit_presets(self) -> &'static [(&'static str, u64, u64)] {
+        match self {
+            Self::Claude => &[
+                ("Pro (2.5M 5h / 18M wk)", 2_500_000, 18_000_000),
+                ("Max 5x (12.5M 5h / 90M wk)", 12_500_000, 90_000_000),
+                ("Max 20x (50M 5h / 360M wk)", 50_000_000, 360_000_000),
+                ("Team / API (100M / 500M)", 100_000_000, 500_000_000),
+            ],
+            Self::Antigravity => &[
+                ("Standard (3M 5h / 20M wk)", 3_000_000, 20_000_000),
+                ("Pro (8M 5h / 50M wk)", 8_000_000, 50_000_000),
+                ("Heavy (20M 5h / 120M wk)", 20_000_000, 120_000_000),
+                ("Max (50M 5h / 300M wk)", 50_000_000, 300_000_000),
+            ],
         }
     }
 }
@@ -97,6 +132,16 @@ impl AgentSnapshot {
                 status_updated_at: Some(now_ms - 12_000.0),
             },
             Agent {
+                harness: Harness::Antigravity,
+                pid: 42070,
+                session_id: "demo-2".into(),
+                cwd: "/home/dev/work/hyperdrive-engine".into(),
+                name: Some("Rewrite warp stabilizer in Rust".into()),
+                status: Some("busy".into()),
+                started_at: now_ms - 95_000.0,
+                status_updated_at: Some(now_ms - 5_000.0),
+            },
+            Agent {
                 harness: Harness::Claude,
                 pid: 42071,
                 session_id: "demo-3".into(),
@@ -108,8 +153,35 @@ impl AgentSnapshot {
             },
         ];
         snap.tokens.insert("demo-1".into(), (142_000, 48_500));
+        snap.tokens.insert("demo-2".into(), (96_000, 31_000));
         snap.tokens.insert("demo-3".into(), (210_000, 64_000));
+        snap.subagents.insert(
+            "demo-1".into(),
+            vec![
+                SubAgent {
+                    id: "s1".into(),
+                    description: "Port fire palette".into(),
+                    agent_type: "general".into(),
+                    finished: true,
+                    tokens: (18_000, 4_200),
+                },
+                SubAgent {
+                    id: "s2".into(),
+                    description: "Audit spring damping".into(),
+                    agent_type: "explore".into(),
+                    finished: false,
+                    tokens: (9_400, 1_100),
+                },
+            ],
+        );
         snap
+    }
+
+    pub fn count(&self, harness: Option<Harness>) -> (usize, usize) {
+        let it = self.agents.iter().filter(|a| harness.is_none_or(|h| a.harness == h));
+        let all: Vec<_> = it.collect();
+        let busy = all.iter().filter(|a| a.status.as_deref() == Some("busy")).count();
+        (busy, all.len())
     }
 }
 
@@ -262,6 +334,23 @@ fn slugify_cwd(cwd: &str) -> String {
     cwd.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
+}
+
+/// Claude + Antigravity sessions, newest first.
+pub fn refresh_all(
+    claude_dir: &Path,
+    gemini_dir: &Path,
+    state: &mut AgentParseState,
+    agy: &mut super::antigravity::AntigravitySessions,
+) -> AgentSnapshot {
+    let mut snap = refresh_from_dirs(claude_dir, state);
+    for (agent, tokens) in agy.refresh(gemini_dir) {
+        snap.tokens.insert(agent.session_id.clone(), tokens);
+        snap.agents.push(agent);
+    }
+    snap.agents
+        .sort_by(|a, b| b.started_at.partial_cmp(&a.started_at).unwrap_or(std::cmp::Ordering::Equal));
+    snap
 }
 
 /// Refresh Claude sessions from `~/.claude` (or provided root for tests).

@@ -2,10 +2,12 @@ use crate::config::Prefs;
 use crate::fire::Fire;
 use crate::platform::{self, Overlay};
 use crate::shape::Spring;
-use crate::stores::agents::{AgentParseState, AgentSnapshot};
+use crate::stores::agents::{AgentParseState, AgentSnapshot, Harness};
+use crate::stores::antigravity::AntigravitySessions;
 use crate::stores::battery::BatterySnapshot;
 use crate::stores::hud::HudSnapshot;
 use crate::stores::now_playing::NowPlayingSnapshot;
+use crate::stores::usage::UsageSnapshot;
 use crate::ui;
 use eframe::egui;
 use std::path::PathBuf;
@@ -64,6 +66,10 @@ pub struct BullshitNotchApp {
     hud_rx: watch::Receiver<HudSnapshot>,
     art_tex: Option<(String, egui::TextureHandle)>,
     started: Instant,
+    usage_rx: watch::Receiver<UsageSnapshot>,
+    ui_state: ui::UiState,
+    /// `--open`: keep the panel expanded (layout debugging / screenshots).
+    pin_open: bool,
 }
 
 impl BullshitNotchApp {
@@ -92,6 +98,7 @@ impl BullshitNotchApp {
         if !demo {
             let ctx = cc.egui_ctx.clone();
             let claude_dir = dirs_claude();
+            let gemini_dir = dirs_home().join(".gemini");
             std::thread::spawn(move || {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -99,8 +106,9 @@ impl BullshitNotchApp {
                     .expect("tokio");
                 rt.block_on(async move {
                     let mut state = AgentParseState::default();
+                    let mut agy = AntigravitySessions::default();
                     loop {
-                        let snap = AgentSnapshot::refresh_blocking(&claude_dir, &mut state);
+                        let snap = crate::stores::agents::refresh_all(&claude_dir, &gemini_dir, &mut state, &mut agy);
                         let _ = tx.send(snap);
                         ctx.request_repaint();
                         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -110,6 +118,11 @@ impl BullshitNotchApp {
         }
 
         let (music_rx, battery_rx, hud_rx) = crate::stores::spawn_live(&cc.egui_ctx, demo);
+        let usage_rx = if demo {
+            crate::stores::fixed(UsageSnapshot::demo())
+        } else {
+            crate::stores::usage::spawn(cc.egui_ctx.clone(), dirs_claude(), dirs_home().join(".gemini"))
+        };
 
         Self {
             music_rx,
@@ -117,6 +130,10 @@ impl BullshitNotchApp {
             hud_rx,
             art_tex: None,
             started: Instant::now(),
+            usage_rx,
+            // Swift demo opens on the Claude filter to show the limits card.
+            ui_state: ui::UiState { agent_filter: demo.then_some(Harness::Claude), ..Default::default() },
+            pin_open: std::env::args().any(|a| a == "--open"),
             prefs,
             overlay: Overlay::new(),
             overlay_ready: false,
@@ -196,7 +213,8 @@ impl eframe::App for BullshitNotchApp {
             self.reopen_armed = true;
         }
 
-        let want_open = self.prefs.open_on_hover && hovering && (already_open || self.reopen_armed);
+        let want_open =
+            self.pin_open || (self.prefs.open_on_hover && hovering && (already_open || self.reopen_armed));
         self.open_spring.target = if want_open { 1.0 } else { 0.0 };
         let dt = ctx.input(|i| i.stable_dt).clamp(1.0 / 120.0, 0.05);
         // Higher damping — close must not bounce.
@@ -245,11 +263,13 @@ impl eframe::App for BullshitNotchApp {
             }
         }
 
-        self.face_frame = self.face_frame.wrapping_add(1);
+        // Faces tick every 0.3s like the macOS TimelineView.
+        self.face_frame = (self.started.elapsed().as_secs_f64() / 0.3) as usize;
 
         let music = self.music_rx.borrow().clone();
         let battery = self.battery_rx.borrow().clone();
         let hud = self.hud_rx.borrow().clone();
+        let usage = self.usage_rx.borrow().clone();
         self.sync_artwork(ctx, &music);
 
         let view = ui::View {
@@ -258,6 +278,7 @@ impl eframe::App for BullshitNotchApp {
             music: &music,
             battery: &battery,
             hud: &hud,
+            usage: &usage,
             fire_tex: self.fire_texture.as_ref(),
             art_tex: self.art_tex.as_ref().map(|(_, t)| t),
             burning,
@@ -266,7 +287,7 @@ impl eframe::App for BullshitNotchApp {
             time: self.started.elapsed().as_secs_f64(),
             t: self.open_spring.pos,
         };
-        let (shape_rect, actions) = ui::draw_notch(ctx, &view);
+        let (shape_rect, actions) = ui::draw_notch(ctx, &view, &mut self.ui_state);
         let transient = hud.visible() || battery.just_changed();
         self.last_shape_rect = shape_rect;
         for action in actions {
@@ -310,6 +331,20 @@ impl BullshitNotchApp {
     fn apply(&mut self, action: ui::Action) {
         match action {
             ui::Action::Media(cmd) => crate::stores::now_playing::send(cmd),
+            ui::Action::SetLimits(h, session, weekly) => {
+                match h {
+                    Harness::Claude => {
+                        self.prefs.claude_daily_limit = session;
+                        self.prefs.claude_weekly_limit = weekly;
+                    }
+                    Harness::Antigravity => {
+                        self.prefs.agy_daily_limit = session;
+                        self.prefs.agy_weekly_limit = weekly;
+                    }
+                }
+                let _ = self.prefs.save();
+            }
+            ui::Action::RefreshUsage => crate::stores::usage::refresh_now(),
         }
     }
 }
@@ -320,10 +355,14 @@ impl AgentSnapshot {
     }
 }
 
-fn dirs_claude() -> PathBuf {
+fn dirs_home() -> PathBuf {
     directories::UserDirs::new()
-        .map(|u| u.home_dir().join(".claude"))
-        .unwrap_or_else(|| PathBuf::from(".claude"))
+        .map(|u| u.home_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn dirs_claude() -> PathBuf {
+    dirs_home().join(".claude")
 }
 
 #[cfg(test)]

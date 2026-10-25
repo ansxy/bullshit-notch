@@ -1,12 +1,14 @@
+pub mod agents;
 pub mod wings;
 
 use crate::config::Prefs;
 use crate::palette::Palette;
 use crate::shape::NotchShape;
-use crate::stores::agents::{Agent, AgentSnapshot};
+use crate::stores::agents::{AgentSnapshot, Harness};
 use crate::stores::battery::BatterySnapshot;
 use crate::stores::hud::HudSnapshot;
 use crate::stores::now_playing::{MediaCommand, NowPlayingSnapshot};
+use crate::stores::usage::UsageSnapshot;
 use eframe::egui::{self, Color32, Mesh, Pos2, Rect, Sense, Shape, Stroke, TextureId, Vec2};
 use eframe::epaint::Vertex;
 
@@ -17,6 +19,7 @@ pub struct View<'a> {
     pub music: &'a NowPlayingSnapshot,
     pub battery: &'a BatterySnapshot,
     pub hud: &'a HudSnapshot,
+    pub usage: &'a UsageSnapshot,
     pub fire_tex: Option<&'a egui::TextureHandle>,
     pub art_tex: Option<&'a egui::TextureHandle>,
     pub burning: bool,
@@ -32,6 +35,38 @@ pub struct View<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Action {
     Media(MediaCommand),
+    /// (harness, 5h limit, weekly limit) in effective tokens.
+    SetLimits(Harness, u64, u64),
+    RefreshUsage,
+}
+
+/// Panel UI state that survives frames (not persisted).
+#[derive(Default)]
+pub struct UiState {
+    pub agent_filter: Option<Harness>,
+    pub show_daily: Vec<Harness>,
+    pub custom_limits: Option<(Harness, String, String)>,
+}
+
+/// Rounded translucent card (`NotchCardBackground`).
+pub fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    egui::Frame::none()
+        .fill(crate::ui::white(9))
+        .stroke(Stroke::new(1.0_f32, crate::ui::white(15)))
+        .rounding(10.0)
+        .inner_margin(8.0)
+        .show(ui, add)
+        .inner
+}
+
+/// Small capsule label.
+pub fn pill(ui: &mut egui::Ui, text: &str, strong: bool) -> egui::Response {
+    egui::Frame::none()
+        .fill(crate::ui::white(if strong { 40 } else { 30 }))
+        .rounding(8.0)
+        .inner_margin(egui::Margin::symmetric(6.0, 1.0))
+        .show(ui, |ui| ui.label(egui::RichText::new(text).size(10.0).strong().color(Color32::WHITE)))
+        .response
 }
 
 pub const CLOSED_BASE_W: f32 = 200.0;
@@ -40,7 +75,7 @@ pub const OPEN_H: f32 = 280.0;
 
 /// Draw the notch silhouette + closed wings or expanded panel.
 /// Returns the logical shape rect used for hit-testing, plus requested actions.
-pub fn draw_notch(ctx: &egui::Context, v: &View) -> (Rect, Vec<Action>) {
+pub fn draw_notch(ctx: &egui::Context, v: &View, st: &mut UiState) -> (Rect, Vec<Action>) {
     let t = v.t.clamp(0.0, 1.0);
     let shape = NotchShape::lerp(NotchShape::collapsed(), NotchShape::expanded(), t);
     let prefs = v.prefs;
@@ -87,6 +122,7 @@ pub fn draw_notch(ctx: &egui::Context, v: &View) -> (Rect, Vec<Action>) {
 
                 if t > 0.05 {
                     let fade = ((t - 0.05) / 0.6).clamp(0.0, 1.0);
+                    let rect = rect.shrink2(Vec2::new(shape.flare, 0.0));
                     let music_pal = (prefs.music_ambient)
                         .then(|| v.music.active_palette())
                         .flatten();
@@ -109,7 +145,7 @@ pub fn draw_notch(ctx: &egui::Context, v: &View) -> (Rect, Vec<Action>) {
                     pts.clone(),
                     Stroke::new(
                         1.0_f32,
-                        Color32::from_white_alpha(if t > 0.5 { 40 } else { 22 }),
+                        crate::ui::white(if t > 0.5 { 40 } else { 22 }),
                     ),
                 ));
             }
@@ -130,7 +166,7 @@ pub fn draw_notch(ctx: &egui::Context, v: &View) -> (Rect, Vec<Action>) {
                     );
                 }
             } else {
-                draw_expanded(ui, rect, &shape, v, &mut actions);
+                draw_expanded(ui, rect, &shape, v, st, &mut actions);
             }
 
             let _ = ui.allocate_rect(rect.expand(4.0), Sense::hover());
@@ -164,12 +200,16 @@ fn textured_convex_mesh(tex: TextureId, pts: &[Pos2], rect: Rect, tint: Color32)
 
 /// Concentric-ring mesh over the notch path; vertex colours come from `color_at`.
 /// Stands in for SwiftUI `RadialGradient`s clipped to the shape.
-fn shaded_mesh(pts: &[Pos2], center: Pos2, color_at: impl Fn(Pos2) -> Color32) -> Mesh {
+fn shaded_mesh(pts: &[Pos2], body: Rect, color_at: impl Fn(Pos2) -> Color32) -> Mesh {
     const RINGS: [f32; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+    let center = body.center();
+    // The flared top ears are concave; fanning into them overlaps triangles (visible seams).
+    // Clamp to the body so the fan stays star-shaped from the centre.
+    let pts: Vec<Pos2> = pts.iter().map(|p| Pos2::new(p.x.clamp(body.min.x, body.max.x), p.y)).collect();
     let n = pts.len();
     let mut mesh = Mesh::default();
     for &k in &RINGS {
-        for p in pts {
+        for p in &pts {
             let q = center + (*p - center) * k;
             mesh.colored_vertex(q, color_at(q));
         }
@@ -202,7 +242,7 @@ fn premul(c: Color32, a: f32) -> Color32 {
 fn glow_mesh(pts: &[Pos2], rect: Rect, accent: Color32, strength: f32) -> Mesh {
     let origin = Pos2::new(rect.center().x, rect.max.y);
     let radius = rect.width() * 0.5;
-    shaded_mesh(pts, rect.center(), move |p| {
+    shaded_mesh(pts, rect, move |p| {
         let f = (1.0 - p.distance(origin) / radius).max(0.0);
         premul(accent, strength * f * f)
     })
@@ -234,7 +274,7 @@ fn ambient_mesh(pts: &[Pos2], rect: Rect, pal: &Palette, level: f32, time: f64) 
     ];
     let top = rect.min.y;
     let h = rect.height();
-    shaded_mesh(pts, rect.center(), move |p| {
+    shaded_mesh(pts, rect, move |p| {
         let (mut r, mut g, mut b, mut a) = (0.0f32, 0.0, 0.0, 0.0);
         for (c, op, center, rad) in blobs {
             let f = (1.0 - p.distance(center) / rad).max(0.0);
@@ -261,105 +301,50 @@ fn draw_expanded(
     rect: Rect,
     shape: &NotchShape,
     v: &View,
-    _actions: &mut Vec<Action>,
+    st: &mut UiState,
+    actions: &mut Vec<Action>,
 ) {
     let pad_x = shape.flare + 10.0;
-    let pad_top = shape.flare_depth + 10.0;
-    let pad_bot = shape.bottom + 8.0;
+    let pad_top = shape.flare_depth + 6.0;
+    let pad_bot = shape.bottom * 0.5 + 6.0;
     let inner = Rect::from_min_max(
         Pos2::new(rect.min.x + pad_x, rect.min.y + pad_top),
         Pos2::new(rect.max.x - pad_x, rect.max.y - pad_bot),
     );
-    let snap = v.agents;
-
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner), |ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(8.0, 6.0);
-        ui.vertical(|ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new("Agents")
-                        .color(Color32::WHITE)
-                        .size(13.0)
-                        .strong(),
-                );
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new(format!("{} busy", snap.busy_count()))
-                        .color(Color32::from_rgb(255, 160, 60))
-                        .size(11.0),
-                );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(
-                        egui::RichText::new(format!("{} sessions", snap.agents.len()))
-                            .color(Color32::from_gray(130))
-                            .size(10.0),
-                    );
-                });
-            });
-            ui.add_space(8.0);
-            egui::ScrollArea::vertical()
-                .max_height((inner.height() - 36.0).max(40.0))
-                .show(ui, |ui| {
-                    if snap.agents.is_empty() {
-                        ui.label(
-                            egui::RichText::new("No live Claude sessions")
-                                .color(Color32::from_gray(140))
-                                .size(12.0),
-                        );
-                    }
-                    for agent in &snap.agents {
-                        agent_row(ui, agent, snap, v.face_frame);
-                        ui.add_space(2.0);
-                        ui.separator();
-                        ui.add_space(2.0);
-                    }
-                });
-        });
+        ui.set_clip_rect(inner.expand(2.0));
+        ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
+        agents::show(ui, v, st, actions);
     });
 }
 
-fn agent_row(ui: &mut egui::Ui, agent: &Agent, snap: &AgentSnapshot, face_frame: usize) {
-    let face = Agent::face(agent.status.as_deref(), face_frame);
-    let title = agent
-        .name
-        .clone()
-        .unwrap_or_else(|| agent.session_id.clone());
-    let tokens = snap
-        .tokens
-        .get(&agent.session_id)
-        .copied()
-        .unwrap_or((0, 0));
-    ui.horizontal(|ui| {
-        ui.add_space(2.0);
-        ui.label(
-            egui::RichText::new(face)
-                .monospace()
-                .color(Color32::from_rgb(255, 180, 80))
-                .size(12.0),
-        );
-        ui.add_space(6.0);
-        ui.vertical(|ui| {
-            ui.label(egui::RichText::new(title).color(Color32::WHITE).size(12.0));
-            ui.label(
-                egui::RichText::new(format!(
-                    "{} · in {} out {}",
-                    agent.status.as_deref().unwrap_or("idle"),
-                    compact(tokens.0),
-                    compact(tokens.1)
-                ))
-                .color(Color32::from_gray(140))
-                .size(10.0),
-            );
-        });
-    });
-}
-
+/// Compact count like Swift's `.compactName` with 0…1 fraction digits: 950, 1.2K, 142K, 3.8M, 1B.
 pub fn compact(n: u64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1_000_000.0)
-    } else if n >= 1_000 {
-        format!("{:.1}k", n as f64 / 1_000.0)
-    } else {
-        n.to_string()
+    let (v, suffix) = match n {
+        0..=999 => return n.to_string(),
+        1_000..=999_999 => (n as f64 / 1e3, "K"),
+        1_000_000..=999_999_999 => (n as f64 / 1e6, "M"),
+        _ => (n as f64 / 1e9, "B"),
+    };
+    let s = if v >= 100.0 { format!("{v:.0}") } else { format!("{v:.1}") };
+    format!("{}{suffix}", s.strip_suffix(".0").unwrap_or(&s))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn compact_matches_swift_compact_name() {
+        use super::compact;
+        assert_eq!(compact(950), "950");
+        assert_eq!(compact(1_200), "1.2K");
+        assert_eq!(compact(142_000), "142K");
+        assert_eq!(compact(3_000_000), "3M");
+        assert_eq!(compact(12_500_000), "12.5M");
     }
+}
+
+/// sRGB-space translucent white, like SwiftUI `.white.opacity(a/255)`.
+/// (`Color32::from_white_alpha` is linear-space and comes out far too bright.)
+pub const fn white(a: u8) -> Color32 {
+    Color32::from_rgba_premultiplied(a, a, a, a)
 }

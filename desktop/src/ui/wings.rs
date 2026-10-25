@@ -170,7 +170,7 @@ pub fn visualizer(
 
 pub fn level_bar(painter: &egui::Painter, r: Rect, value: f32) {
     let rad = r.height() * 0.5;
-    painter.rect_filled(r, rad, Color32::from_white_alpha(50));
+    painter.rect_filled(r, rad, crate::ui::white(50));
     let mut fill = r;
     fill.max.x = r.min.x + r.width() * value.clamp(0.0, 1.0);
     if fill.width() > 0.5 {
