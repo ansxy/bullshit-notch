@@ -3,6 +3,9 @@ use crate::fire::Fire;
 use crate::platform::{self, Overlay};
 use crate::shape::Spring;
 use crate::stores::agents::{AgentParseState, AgentSnapshot};
+use crate::stores::battery::BatterySnapshot;
+use crate::stores::hud::HudSnapshot;
+use crate::stores::now_playing::NowPlayingSnapshot;
 use crate::ui;
 use eframe::egui;
 use std::path::PathBuf;
@@ -56,6 +59,11 @@ pub struct BullshitNotchApp {
     reopen_armed: bool,
     /// Wall-clock fire pacing (macOS 80ms timer) — independent of frame/mouse rate.
     last_fire_tick: Instant,
+    music_rx: watch::Receiver<NowPlayingSnapshot>,
+    battery_rx: watch::Receiver<BatterySnapshot>,
+    hud_rx: watch::Receiver<HudSnapshot>,
+    art_tex: Option<(String, egui::TextureHandle)>,
+    started: Instant,
 }
 
 impl BullshitNotchApp {
@@ -101,7 +109,14 @@ impl BullshitNotchApp {
             });
         }
 
+        let (music_rx, battery_rx, hud_rx) = crate::stores::spawn_live(&cc.egui_ctx, demo);
+
         Self {
+            music_rx,
+            battery_rx,
+            hud_rx,
+            art_tex: None,
+            started: Instant::now(),
             prefs,
             overlay: Overlay::new(),
             overlay_ready: false,
@@ -236,17 +251,31 @@ impl eframe::App for BullshitNotchApp {
 
         self.face_frame = self.face_frame.wrapping_add(1);
 
-        let shape_rect = ui::draw_notch(
-            ctx,
-            &self.prefs,
-            &self.open_spring,
-            &snap,
-            self.fire_texture.as_ref(),
+        let music = self.music_rx.borrow().clone();
+        let battery = self.battery_rx.borrow().clone();
+        let hud = self.hud_rx.borrow().clone();
+        self.sync_artwork(ctx, &music);
+
+        let view = ui::View {
+            prefs: &self.prefs,
+            agents: &snap,
+            music: &music,
+            battery: &battery,
+            hud: &hud,
+            fire_tex: self.fire_texture.as_ref(),
+            art_tex: self.art_tex.as_ref().map(|(_, t)| t),
             burning,
-            self.face_frame,
-            self.fire.accent(self.prefs.agent_animation),
-        );
+            face_frame: self.face_frame,
+            fire_accent: self.fire.accent(self.prefs.agent_animation),
+            time: self.started.elapsed().as_secs_f64(),
+            t: self.open_spring.pos,
+        };
+        let (shape_rect, actions) = ui::draw_notch(ctx, &view);
+        let transient = hud.visible() || battery.just_changed();
         self.last_shape_rect = shape_rect;
+        for action in actions {
+            self.apply(action);
+        }
 
         // Open/animating → full-window input so mouse-leave reaches egui.
         // Closed → pill-only so chrome underneath stays clickable.
@@ -264,8 +293,29 @@ impl eframe::App for BullshitNotchApp {
             wants_keyboard,
         );
 
-        let delay = compute_repaint_delay(expanded, spring_moving, burning, false);
+        // HUD/charger pills expire on a timer; keep ticking so they disappear on time.
+        let delay = compute_repaint_delay(expanded, spring_moving || transient, burning, music.playing);
         ctx.request_repaint_after(delay);
+    }
+}
+
+impl BullshitNotchApp {
+    /// Re-upload artwork texture only when the track's art changes.
+    fn sync_artwork(&mut self, ctx: &egui::Context, music: &NowPlayingSnapshot) {
+        match &music.artwork {
+            Some(img) if self.art_tex.as_ref().map(|(k, _)| k) != Some(&music.art_key) => {
+                let tex = ctx.load_texture("artwork", (**img).clone(), egui::TextureOptions::LINEAR);
+                self.art_tex = Some((music.art_key.clone(), tex));
+            }
+            None => self.art_tex = None,
+            _ => {}
+        }
+    }
+
+    fn apply(&mut self, action: ui::Action) {
+        match action {
+            ui::Action::Media(cmd) => crate::stores::now_playing::send(cmd),
+        }
     }
 }
 

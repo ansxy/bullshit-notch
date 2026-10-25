@@ -3,6 +3,7 @@
 mod app;
 mod config;
 mod fire;
+mod palette;
 mod platform;
 mod shape;
 mod stores;
