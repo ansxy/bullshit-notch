@@ -29,7 +29,7 @@ fn main() -> eframe::Result<()> {
         .with_decorations(false)
         .with_transparent(true)
         .with_always_on_top()
-        .with_inner_size([680.0, 420.0])
+        .with_inner_size([680.0, 480.0])
         .with_position([0.0, 0.0])
         .with_title("BullshitNotch");
 

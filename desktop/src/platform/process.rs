@@ -1,4 +1,5 @@
 use std::io;
+use std::path::Path;
 use std::process::Stdio;
 
 #[derive(Debug, Clone)]
@@ -96,6 +97,45 @@ pub async fn kill_process_tree(pid: u32) -> io::Result<()> {
             io::ErrorKind::Unsupported,
             "kill_process_tree unsupported on this OS",
         ))
+    }
+}
+
+/// Open a file or URL with the OS handler (Explorer / `xdg-open`).
+pub fn open_path(path: &Path) {
+    #[cfg(windows)]
+    {
+        let _ = run_hidden_sync("explorer", &[path.to_str().unwrap_or(".")]);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = run_hidden_sync("xdg-open", &[path.to_str().unwrap_or(".")]);
+    }
+}
+
+/// Reveal a file in its parent folder.
+pub fn reveal_path(path: &Path) {
+    #[cfg(windows)]
+    {
+        if let Some(s) = path.to_str() {
+            let _ = run_hidden_sync("explorer", &["/select,", s]);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let parent = path.parent().unwrap_or(path);
+        let _ = run_hidden_sync("xdg-open", &[parent.to_str().unwrap_or(".")]);
+    }
+}
+
+/// Open http(s) / file URL in the default handler.
+pub fn open_url(url: &str) {
+    #[cfg(windows)]
+    {
+        let _ = run_hidden_sync("cmd", &["/C", "start", "", url]);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = run_hidden_sync("xdg-open", &[url]);
     }
 }
 

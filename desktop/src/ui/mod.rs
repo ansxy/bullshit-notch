@@ -1,13 +1,17 @@
 pub mod agents;
+pub mod home;
+pub mod shelf;
 pub mod wings;
 
 use crate::config::Prefs;
 use crate::palette::Palette;
 use crate::shape::NotchShape;
+use crate::stores::agenda::AgendaSnapshot;
 use crate::stores::agents::{AgentSnapshot, Harness};
 use crate::stores::battery::BatterySnapshot;
 use crate::stores::hud::HudSnapshot;
 use crate::stores::now_playing::{MediaCommand, NowPlayingSnapshot};
+use crate::stores::shelf::ShelfSnapshot;
 use crate::stores::usage::UsageSnapshot;
 use eframe::egui::{self, Color32, Mesh, Pos2, Rect, Sense, Shape, Stroke, TextureId, Vec2};
 use eframe::epaint::Vertex;
@@ -20,6 +24,8 @@ pub struct View<'a> {
     pub battery: &'a BatterySnapshot,
     pub hud: &'a HudSnapshot,
     pub usage: &'a UsageSnapshot,
+    pub shelf: &'a ShelfSnapshot,
+    pub agenda: &'a AgendaSnapshot,
     pub fire_tex: Option<&'a egui::TextureHandle>,
     pub art_tex: Option<&'a egui::TextureHandle>,
     pub burning: bool,
@@ -38,11 +44,26 @@ pub enum Action {
     /// (harness, 5h limit, weekly limit) in effective tokens.
     SetLimits(Harness, u64, u64),
     RefreshUsage,
+    ShelfAdd(Vec<std::path::PathBuf>),
+    ShelfRemove(std::path::PathBuf),
+    ShelfClear,
+    Reveal(std::path::PathBuf),
+    OpenPath(std::path::PathBuf),
+    OpenUrl(String),
 }
 
 /// Panel UI state that survives frames (not persisted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NotchTab {
+    #[default]
+    Home,
+    Shelf,
+    Workspace,
+}
+
 #[derive(Default)]
 pub struct UiState {
+    pub tab: NotchTab,
     pub agent_filter: Option<Harness>,
     pub show_daily: Vec<Harness>,
     pub custom_limits: Option<(Harness, String, String)>,
@@ -71,7 +92,7 @@ pub fn pill(ui: &mut egui::Ui, text: &str, strong: bool) -> egui::Response {
 
 pub const CLOSED_BASE_W: f32 = 200.0;
 pub const OPEN_W: f32 = 620.0;
-pub const OPEN_H: f32 = 280.0;
+pub const OPEN_H: f32 = 340.0;
 
 /// Draw the notch silhouette + closed wings or expanded panel.
 /// Returns the logical shape rect used for hit-testing, plus requested actions.
@@ -314,8 +335,55 @@ fn draw_expanded(
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner), |ui| {
         ui.set_clip_rect(inner.expand(2.0));
         ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);
-        agents::show(ui, v, st, actions);
+        tab_bar(ui, v, st);
+        ui.add_space(4.0);
+        match st.tab {
+            NotchTab::Home if v.prefs.tab_home => home::show(ui, v, actions),
+            NotchTab::Shelf if v.prefs.tab_shelf => shelf::show(ui, v, actions),
+            NotchTab::Workspace if v.prefs.tab_topbar => agents::show(ui, v, st, actions),
+            _ => {
+                // Hidden tab still selected — fall back to first enabled.
+                if v.prefs.tab_home {
+                    home::show(ui, v, actions);
+                } else if v.prefs.tab_shelf {
+                    shelf::show(ui, v, actions);
+                } else {
+                    agents::show(ui, v, st, actions);
+                }
+            }
+        }
     });
+}
+
+fn tab_bar(ui: &mut egui::Ui, v: &View, st: &mut UiState) {
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if v.prefs.tab_home {
+            tab_pill(ui, st, NotchTab::Home, "Home");
+        }
+        if v.prefs.tab_shelf {
+            tab_pill(ui, st, NotchTab::Shelf, "Shelf");
+        }
+        if v.prefs.tab_topbar {
+            tab_pill(ui, st, NotchTab::Workspace, "Workspace");
+        }
+    });
+}
+
+fn tab_pill(ui: &mut egui::Ui, st: &mut UiState, tab: NotchTab, label: &str) {
+    let on = st.tab == tab;
+    let resp = egui::Frame::none()
+        .fill(if on { crate::ui::white(40) } else { Color32::TRANSPARENT })
+        .rounding(10.0)
+        .inner_margin(egui::Margin::symmetric(8.0, 3.0))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(label).size(11.0).color(if on { Color32::WHITE } else { Color32::from_gray(140) }));
+        })
+        .response
+        .interact(egui::Sense::click());
+    if resp.clicked() {
+        st.tab = tab;
+    }
 }
 
 /// Compact count like Swift's `.compactName` with 0…1 fraction digits: 950, 1.2K, 142K, 3.8M, 1B.

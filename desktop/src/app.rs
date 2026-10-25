@@ -7,6 +7,8 @@ use crate::stores::antigravity::AntigravitySessions;
 use crate::stores::battery::BatterySnapshot;
 use crate::stores::hud::HudSnapshot;
 use crate::stores::now_playing::NowPlayingSnapshot;
+use crate::stores::agenda::AgendaSnapshot;
+use crate::stores::shelf::ShelfSnapshot;
 use crate::stores::usage::UsageSnapshot;
 use crate::ui;
 use eframe::egui;
@@ -17,7 +19,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::watch;
 
 const WINDOW_W: f32 = 680.0;
-const WINDOW_H: f32 = 420.0;
+const WINDOW_H: f32 = 480.0;
 
 pub fn compute_repaint_delay(
     expanded: bool,
@@ -67,6 +69,8 @@ pub struct BullshitNotchApp {
     art_tex: Option<(String, egui::TextureHandle)>,
     started: Instant,
     usage_rx: watch::Receiver<UsageSnapshot>,
+    shelf_rx: watch::Receiver<ShelfSnapshot>,
+    agenda_rx: watch::Receiver<AgendaSnapshot>,
     ui_state: ui::UiState,
     /// `--open`: keep the panel expanded (layout debugging / screenshots).
     pin_open: bool,
@@ -123,6 +127,8 @@ impl BullshitNotchApp {
         } else {
             crate::stores::usage::spawn(cc.egui_ctx.clone(), dirs_claude(), dirs_home().join(".gemini"))
         };
+        let shelf_rx = crate::stores::shelf::spawn(demo);
+        let agenda_rx = crate::stores::agenda::spawn(cc.egui_ctx.clone(), demo);
 
         Self {
             music_rx,
@@ -131,6 +137,8 @@ impl BullshitNotchApp {
             art_tex: None,
             started: Instant::now(),
             usage_rx,
+            shelf_rx,
+            agenda_rx,
             // Swift demo opens on the Claude filter to show the limits card.
             ui_state: ui::UiState { agent_filter: demo.then_some(Harness::Claude), ..Default::default() },
             pin_open: std::env::args().any(|a| a == "--open"),
@@ -213,8 +221,9 @@ impl eframe::App for BullshitNotchApp {
             self.reopen_armed = true;
         }
 
+        let file_hover = ctx.input(|i| !i.raw.hovered_files.is_empty() || !i.raw.dropped_files.is_empty());
         let want_open =
-            self.pin_open || (self.prefs.open_on_hover && hovering && (already_open || self.reopen_armed));
+            self.pin_open || file_hover || (self.prefs.open_on_hover && hovering && (already_open || self.reopen_armed));
         self.open_spring.target = if want_open { 1.0 } else { 0.0 };
         let dt = ctx.input(|i| i.stable_dt).clamp(1.0 / 120.0, 0.05);
         // Higher damping — close must not bounce.
@@ -270,6 +279,8 @@ impl eframe::App for BullshitNotchApp {
         let battery = self.battery_rx.borrow().clone();
         let hud = self.hud_rx.borrow().clone();
         let usage = self.usage_rx.borrow().clone();
+        let shelf = self.shelf_rx.borrow().clone();
+        let agenda = self.agenda_rx.borrow().clone();
         self.sync_artwork(ctx, &music);
 
         let view = ui::View {
@@ -279,6 +290,8 @@ impl eframe::App for BullshitNotchApp {
             battery: &battery,
             hud: &hud,
             usage: &usage,
+            shelf: &shelf,
+            agenda: &agenda,
             fire_tex: self.fire_texture.as_ref(),
             art_tex: self.art_tex.as_ref().map(|(_, t)| t),
             burning,
@@ -345,6 +358,12 @@ impl BullshitNotchApp {
                 let _ = self.prefs.save();
             }
             ui::Action::RefreshUsage => crate::stores::usage::refresh_now(),
+            ui::Action::ShelfAdd(paths) => crate::stores::shelf::add(paths),
+            ui::Action::ShelfRemove(path) => crate::stores::shelf::remove(&path),
+            ui::Action::ShelfClear => crate::stores::shelf::clear(),
+            ui::Action::Reveal(path) => platform::process::reveal_path(&path),
+            ui::Action::OpenPath(path) => platform::process::open_path(&path),
+            ui::Action::OpenUrl(url) => platform::process::open_url(&url),
         }
     }
 }
