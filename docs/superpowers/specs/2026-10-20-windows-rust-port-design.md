@@ -68,3 +68,24 @@ On Windows monitors (which usually lack a physical camera housing cutout), Bulls
    - When open/animating spring transition: repaints at display refresh rate until spring settles (`|vel| < 0.5 && |target - pos| < 0.5`).
 5. **Subprocess Execution (`src/platform/process.rs`)**
    - Shared async helper `run_hidden(program, args)` using `tokio::process::Command` with `.creation_flags(0x08000000)` (`CREATE_NO_WINDOW`) so background `docker`, `podman`, and `gh` invocations never flash a console window.
+
+---
+
+## 4. Linux Extension (Win + Linux crate under `desktop/`)
+
+**Date added:** 2026-10-25  
+**Crate path:** `desktop/` (shared Windows + Linux; original `windows/` layout superseded for this MVP).  
+**MVP plan:** [`docs/superpowers/plans/2026-10-25-desktop-win-linux-mvp.md`](../plans/2026-10-25-desktop-win-linux-mvp.md).
+
+### Linux overlay strategy
+
+Wayland does not expose global cursor position or arbitrary top-of-screen window placement for normal clients. For the MVP:
+
+1. **Force X11 backend** via winit `EventLoopBuilderExtX11::with_x11` (runs under XWayland on Fedora/Bazzite Wayland sessions).
+2. **Click-through** via X11 **XShape input region** set to `shape_rect.expand(4.0)` in window coordinates. The window only receives pointer events inside the notch silhouette; egui sees hover natively without a global cursor poll.
+3. **Window hints:** `_NET_WM_WINDOW_TYPE_DOCK`, `_NET_WM_STATE_ABOVE`, `SKIP_TASKBAR`, positioned top-center of the primary monitor.
+4. **ponytail:** native Wayland layer-shell (`zwlr_layer_shell_v1`) is the upgrade path when global positioning and exclusive zones are required without XWayland.
+
+### Shared domain modules
+
+`config`, `shape`, `fire`, `stores/agents` stay pure Rust and are exercised with `cargo test` on Linux. Only `platform/win32.rs` and `platform/x11.rs` (plus process creation flags) are OS-specific.

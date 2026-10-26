@@ -2,6 +2,7 @@
 
 [![macOS](https://img.shields.io/badge/macOS-14.0%2B-black?logo=apple)](https://www.apple.com/macos/)
 [![Swift](https://img.shields.io/badge/Swift-Zero%20Dependencies-orange?logo=swift)](https://swift.org)
+[![Windows / Linux](https://img.shields.io/badge/Windows%20%2B%20Linux-Rust%20%2B%20egui-9b7dff?logo=rust)](desktop/)
 [![Vibe](https://img.shields.io/badge/Vibe-Random%20Bullshit%20Go-ff2d78)](#)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -23,7 +24,7 @@
 **BullshitNotch** turns your MacBook notch into an absurdly over-qualified command center that stays **one constant size** when closed, lights itself on fire when your AI agents are cooking, and expands on hover into everything you actually use:
 
 - 🔥 **8 Ridiculous Notch Animations**: **Doom Fire**, **KITT Scanner**, **Tesla Lightning**, **Cyberpunk Plasma**, **Matrix Rain**, **RGB Rave**, **Hyperspace Warp**, or **Random Bullshit Go** (all of them at once).
-- 🤖 **AI Agent Mission Control**: Live sessions & subagent trees for **Claude Code** and **Antigravity**, plus **5-hour session** & **7-day weekly** quota bars (`LIVE` OAuth sync + cache-weighted token math so cached turns don't fake-inflate your usage).
+- 🤖 **AI Agent Mission Control**: Live sessions & subagent trees for **Claude Code**, **Antigravity**, **Cursor**, and **Command Code**, plus **5-hour session** & **7-day weekly** quota bars. Claude and Command Code can show a `LIVE` badge, Cursor counts requests instead of tokens, and cache-weighted math keeps cached turns from fake-inflating usage. Turn any harness off in **Settings → Activities**.
 - 🚀 **Work Project Runner**: Drop your repo folders in, start/stop dev servers with live logs, pop open **Terminal / iTerm**, or launch your project straight into `claude`, `agy`, `codex`, `opencode`, or `aider`.
 - 🐳 **Containers**: Start, stop, tail logs, or shell into **Docker / OrbStack / Podman** containers without touching a terminal.
 - 🎵 **Music + Ambient Aurora**: Spotify & Apple Music controls with a breathing multi-color aurora bled from the album art.
@@ -56,6 +57,25 @@ cd bullshit-notch
 ./build.sh      # Build & launch BullshitNotch.app
 ./package.sh    # Build universal dist/BullshitNotch.dmg & BullshitNotch.zip
 ```
+
+## 🖥️ No MacBook Notch? Fine.
+
+Windows and Linux get the same top-of-screen panel from `desktop/` (Rust + egui). On Linux it wants **X11 or XWayland** so the hover shape can click through.
+
+```bash
+cargo run --manifest-path desktop/Cargo.toml
+cargo run --manifest-path desktop/Cargo.toml -- --demo          # fake sessions, no live files
+cargo run --manifest-path desktop/Cargo.toml -- --demo --open   # pin the panel open
+```
+
+Package it:
+
+```bash
+bash desktop/package-linux.sh     # dist/bullshit-notch-linux-x86_64.tar.gz
+./desktop/package-windows.ps1     # dist/bullshit-notch-windows-x86_64.zip
+```
+
+A `desktop-v*` tag builds those archives on GitHub Actions.
 
 ## 🗑️ Uninstall
 
