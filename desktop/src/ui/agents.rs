@@ -11,15 +11,27 @@ const YELLOW: Color32 = Color32::from_rgb(255, 214, 10);
 const MUTED: Color32 = Color32::from_gray(140);
 
 pub fn show(ui: &mut egui::Ui, v: &View, st: &mut UiState, actions: &mut Vec<Action>) {
-    ui.horizontal(|ui| {
+    if st.agent_filter.is_some_and(|h| !v.prefs.harness_enabled(h)) {
+        st.agent_filter = None;
+    }
+    ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         filter_pill(ui, v, st, None);
         for h in Harness::ALL {
-            filter_pill(ui, v, st, Some(h));
+            if v.prefs.harness_enabled(h) {
+                filter_pill(ui, v, st, Some(h));
+            }
         }
     });
     ui.add_space(4.0);
+    usage_overview(ui, v, st);
+    ui.add_space(4.0);
     let area = ui.available_rect_before_wrap();
+    // Mid-open spring: pills already ate the inner rect. Negative height
+    // trips egui `set_min_height` (`assert 0.0 <= height`).
+    if area.height() < 48.0 || area.width() < 80.0 {
+        return;
+    }
     match st.agent_filter {
         Some(h) => {
             let card_w = 250.0;
@@ -28,7 +40,8 @@ pub fn show(ui: &mut egui::Ui, v: &View, st: &mut UiState, actions: &mut Vec<Act
             let card_rect = egui::Rect::from_min_max(egui::pos2(area.max.x - card_w, area.min.y), area.max);
             column(ui, list_rect, |ui| {
                 card(ui, |ui| {
-                    ui.set_min_size(list_rect.size() - Vec2::splat(18.0));
+                    let min = (list_rect.size() - Vec2::splat(18.0)).max(Vec2::ZERO);
+                    ui.set_min_size(min);
                     let shown: Vec<&Agent> = v.agents.agents.iter().filter(|a| a.harness == h).collect();
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Running").size(11.0).strong().color(MUTED));
@@ -49,7 +62,7 @@ pub fn show(ui: &mut egui::Ui, v: &View, st: &mut UiState, actions: &mut Vec<Act
             ui.allocate_rect(area, egui::Sense::hover());
         }
         None => {
-            let all: Vec<&Agent> = v.agents.agents.iter().collect();
+            let all: Vec<&Agent> = v.agents.agents.iter().filter(|a| v.prefs.harness_enabled(a.harness)).collect();
             if all.is_empty() {
                 ui.centered_and_justified(|ui| {
                     ui.label(RichText::new("No agent sessions running").size(12.0).color(MUTED));
@@ -62,7 +75,14 @@ pub fn show(ui: &mut egui::Ui, v: &View, st: &mut UiState, actions: &mut Vec<Act
 }
 
 fn filter_pill(ui: &mut egui::Ui, v: &View, st: &mut UiState, h: Option<Harness>) {
-    let (busy, n) = v.agents.count(h);
+    let (busy, n) = match h {
+        Some(h) => v.agents.count(Some(h)),
+        None => {
+            let it: Vec<_> = v.agents.agents.iter().filter(|a| v.prefs.harness_enabled(a.harness)).collect();
+            let busy = it.iter().filter(|a| a.status.as_deref() == Some("busy")).count();
+            (busy, it.len())
+        }
+    };
     let selected = st.agent_filter == h;
     let resp = egui::Frame::none()
         .fill(if selected { crate::ui::white(40) } else { Color32::TRANSPARENT })
@@ -82,6 +102,56 @@ fn filter_pill(ui: &mut egui::Ui, v: &View, st: &mut UiState, h: Option<Harness>
     if resp.clicked() {
         st.agent_filter = h;
     }
+}
+
+/// Compact 5h usage chips so All view can still check Cursor / Command Code.
+fn usage_overview(ui: &mut egui::Ui, v: &View, st: &mut UiState) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
+        for h in Harness::ALL {
+            if !v.prefs.harness_enabled(h) {
+                continue;
+            }
+            let stats = v.usage.stats(h);
+            let (lim, _) = v.prefs.limits_for(h);
+            let used = stats.session.effective();
+            let pct = stats
+                .live_five_hour_percent
+                .map(|p| (p / 100.0).clamp(0.0, 1.0))
+                .unwrap_or_else(|| if lim > 0 { (used as f64 / lim as f64).min(1.0) } else { 0.0 });
+            let on = st.agent_filter == Some(h);
+            let resp = egui::Frame::none()
+                .fill(if on { crate::ui::white(40) } else { crate::ui::white(12) })
+                .rounding(8.0)
+                .inner_margin(egui::Margin::symmetric(6.0, 3.0))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    dot(ui, h.color());
+                    ui.label(RichText::new(h.label()).size(10.0).color(Color32::WHITE));
+                    ui.label(
+                        RichText::new(format!("{}%", (pct * 100.0).round() as i64))
+                            .monospace()
+                            .size(10.0)
+                            .color(h.color()),
+                    );
+                    let (bar, _) = ui.allocate_exact_size(Vec2::new(36.0, 4.0), egui::Sense::hover());
+                    ui.painter().rect_filled(bar, 2.0, crate::ui::white(30));
+                    let mut fill = bar;
+                    fill.max.x = bar.min.x + (bar.width() * pct as f32).max(2.0);
+                    ui.painter().rect_filled(fill, 2.0, h.color());
+                })
+                .response
+                .interact(egui::Sense::click())
+                .on_hover_text(if h.usage_is_requests() {
+                    format!("{} / {} req (5h)", compact(used), compact(lim))
+                } else {
+                    format!("{} / {} (5h)", compact(used), compact(lim))
+                });
+            if resp.clicked() {
+                st.agent_filter = if on { None } else { Some(h) };
+            }
+        }
+    });
 }
 
 /// Top-down child UI confined to `rect`.
@@ -192,22 +262,24 @@ fn sub_row(ui: &mut egui::Ui, s: &SubAgent, frame: usize) {
 }
 
 fn limits_card(ui: &mut egui::Ui, v: &View, st: &mut UiState, h: Harness, actions: &mut Vec<Action>) {
-    let stats: &UsageStats = if h == Harness::Claude { &v.usage.claude } else { &v.usage.agy };
-    let (sess_limit, week_limit) = match h {
-        Harness::Claude => (v.prefs.claude_daily_limit, v.prefs.claude_weekly_limit),
-        Harness::Antigravity => (v.prefs.agy_daily_limit, v.prefs.agy_weekly_limit),
-    };
+    let stats: &UsageStats = v.usage.stats(h);
+    let (sess_limit, week_limit) = v.prefs.limits_for(h);
     card(ui, |ui| {
         ui.set_width(234.0);
         ui.horizontal(|ui| {
             dot(ui, h.color());
             ui.label(RichText::new(format!("{} Limits", h.label())).size(11.0).strong().color(Color32::WHITE));
-            if h == Harness::Claude && v.usage.oauth_connected {
+            let live = (h == Harness::Claude && v.usage.oauth_connected) || (h == Harness::CommandCode && v.usage.cc_live);
+            if live {
                 ui.label(
                     RichText::new(" LIVE ").monospace().size(8.0).strong().color(Color32::from_rgb(48, 209, 88))
                         .background_color(Color32::from_rgba_unmultiplied(48, 209, 88, 50)),
                 )
-                .on_hover_text("Synced with Anthropic /usage OAuth endpoint");
+                .on_hover_text(if h == Harness::CommandCode {
+                    "Synced with Command Code /alpha/usage/summary"
+                } else {
+                    "Synced with Anthropic /usage OAuth endpoint"
+                });
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.menu_button(RichText::new("⚙").size(11.0).color(MUTED), |ui| {
@@ -220,11 +292,19 @@ fn limits_card(ui: &mut egui::Ui, v: &View, st: &mut UiState, h: Harness, action
                         }
                     }
                     ui.separator();
-                    if ui.button("Set Custom Limits (M)…").clicked() {
+                    if ui.button(if h.usage_is_requests() { "Set Custom Limits…" } else { "Set Custom Limits (M)…" }).clicked() {
                         st.custom_limits = Some((
                             h,
-                            format!("{:.1}", sess_limit as f64 / 1e6),
-                            format!("{:.1}", week_limit as f64 / 1e6),
+                            if h.usage_is_requests() {
+                                sess_limit.to_string()
+                            } else {
+                                format!("{:.1}", sess_limit as f64 / 1e6)
+                            },
+                            if h.usage_is_requests() {
+                                week_limit.to_string()
+                            } else {
+                                format!("{:.1}", week_limit as f64 / 1e6)
+                            },
                         ));
                         ui.close_menu();
                     }
@@ -247,12 +327,21 @@ fn limits_card(ui: &mut egui::Ui, v: &View, st: &mut UiState, h: Harness, action
         if let Some((ch, s, w)) = st.custom_limits.as_mut().filter(|c| c.0 == h).map(|c| (c.0, &mut c.1, &mut c.2)) {
             let mut save = false;
             ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(s).hint_text("5h (M)").desired_width(60.0).font(egui::TextStyle::Monospace));
-                ui.add(egui::TextEdit::singleline(w).hint_text("7d (M)").desired_width(60.0).font(egui::TextStyle::Monospace));
+                let (hs, ws) = if h.usage_is_requests() {
+                    ("5h req", "7d req")
+                } else {
+                    ("5h (M)", "7d (M)")
+                };
+                ui.add(egui::TextEdit::singleline(s).hint_text(hs).desired_width(60.0).font(egui::TextStyle::Monospace));
+                ui.add(egui::TextEdit::singleline(w).hint_text(ws).desired_width(60.0).font(egui::TextStyle::Monospace));
                 save = ui.button("Save").clicked();
             });
             if save {
-                let parse = |t: &str| t.trim().parse::<f64>().ok().filter(|x| *x > 0.0).map(|x| (x * 1e6) as u64);
+                let parse = |t: &str| {
+                    t.trim().parse::<f64>().ok().filter(|x| *x > 0.0).map(|x| {
+                        if h.usage_is_requests() { x.round() as u64 } else { (x * 1e6) as u64 }
+                    })
+                };
                 actions.push(Action::SetLimits(ch, parse(s).unwrap_or(sess_limit), parse(w).unwrap_or(week_limit)));
                 st.custom_limits = None;
             }
@@ -260,7 +349,7 @@ fn limits_card(ui: &mut egui::Ui, v: &View, st: &mut UiState, h: Harness, action
 
         ui.separator();
         if st.show_daily.contains(&h) {
-            limit_block(ui, "Today (Daily)", Some("since midnight".into()), &stats.daily, sess_limit, None, h.color());
+            limit_block(ui, "Today (Daily)", Some("since midnight".into()), &stats.daily, sess_limit, None, h.color(), h);
         } else {
             limit_block(
                 ui,
@@ -270,6 +359,7 @@ fn limits_card(ui: &mut egui::Ui, v: &View, st: &mut UiState, h: Harness, action
                 sess_limit,
                 stats.live_five_hour_percent.map(|p| p / 100.0),
                 h.color(),
+                h,
             );
         }
         ui.separator();
@@ -281,6 +371,7 @@ fn limits_card(ui: &mut egui::Ui, v: &View, st: &mut UiState, h: Harness, action
             week_limit,
             stats.live_seven_day_percent.map(|p| p / 100.0),
             h.color(),
+            h,
         );
     });
 }
@@ -293,6 +384,7 @@ fn limit_block(
     limit: u64,
     override_pct: Option<f64>,
     color: Color32,
+    h: Harness,
 ) {
     let used = b.effective();
     let pct = override_pct
@@ -324,10 +416,18 @@ fn limit_block(
         ui.label(mono(format!("{} / {}", compact(used), compact(limit)), MUTED));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(mono(
-                format!("↑{} ↓{} ⚡{}", compact(b.input + b.cache_write), compact(b.output), compact(b.cache_read)),
+                if h.usage_is_requests() {
+                    format!("{} req", compact(used))
+                } else {
+                    format!("↑{} ↓{} ⚡{}", compact(b.input + b.cache_write), compact(b.output), compact(b.cache_read))
+                },
                 Color32::from_gray(100),
             ))
-            .on_hover_text("Uncached input · Output · Prompt cache hits (weighted 0.1x)");
+            .on_hover_text(if h.usage_is_requests() {
+                "Cursor composer/agent requests (unique requestId in ~/.cursor/ai-tracking)"
+            } else {
+                "Uncached input · Output · Prompt cache hits (weighted 0.1x)"
+            });
         });
     });
 }

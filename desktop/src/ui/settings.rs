@@ -143,6 +143,12 @@ fn activities(ui: &mut egui::Ui, p: &mut Prefs) {
     ui.checkbox(&mut p.agenda, "Agenda");
     ui.checkbox(&mut p.replace_hud, "Replace system HUD");
     ui.checkbox(&mut p.agent_animation_always_on, "Always animate fire");
+    ui.add_space(6.0);
+    ui.label(RichText::new("Usage trackers").size(11.0).color(MUTED));
+    ui.checkbox(&mut p.usage_claude, "Claude Code");
+    ui.checkbox(&mut p.usage_antigravity, "Antigravity");
+    ui.checkbox(&mut p.usage_cursor, "Cursor");
+    ui.checkbox(&mut p.usage_commandcode, "Command Code");
     ui.label(RichText::new("Agent animation").size(11.0).color(MUTED));
     ui.horizontal_wrapped(|ui| {
         for style in AgentAnimationStyle::ALL {

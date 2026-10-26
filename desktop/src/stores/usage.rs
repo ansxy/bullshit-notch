@@ -1,7 +1,10 @@
-//! 5h / daily / 7d token usage for Claude Code + Antigravity (port of `Sources/AgentUsage.swift`),
-//! plus optional live Claude OAuth `/usage` percentages.
+//! 5h / daily / 7d token usage for Claude / Antigravity / Command Code,
+//! plus Cursor request counts and optional live `/usage` percentages.
 
 use super::antigravity;
+use super::agents::Harness;
+use super::commandcode;
+use super::cursor;
 use chrono::{DateTime, Duration as CDuration, Local, TimeZone, Utc};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -75,7 +78,21 @@ impl UsageStats {
 pub struct UsageSnapshot {
     pub claude: UsageStats,
     pub agy: UsageStats,
+    pub cursor: UsageStats,
+    pub commandcode: UsageStats,
     pub oauth_connected: bool,
+    pub cc_live: bool,
+}
+
+impl UsageSnapshot {
+    pub fn stats(&self, h: Harness) -> &UsageStats {
+        match h {
+            Harness::Claude => &self.claude,
+            Harness::Antigravity => &self.agy,
+            Harness::Cursor => &self.cursor,
+            Harness::CommandCode => &self.commandcode,
+        }
+    }
 }
 
 impl UsageSnapshot {
@@ -102,7 +119,26 @@ impl UsageSnapshot {
                 weekly_oldest: Some(now - CDuration::days(5)),
                 ..Default::default()
             },
+            cursor: UsageStats {
+                session: b(42, 0, 0, 0),
+                daily: b(96, 0, 0, 0),
+                weekly: b(310, 0, 0, 0),
+                session_oldest: Some(now - CDuration::minutes(80)),
+                weekly_oldest: Some(now - CDuration::days(4)),
+                ..Default::default()
+            },
+            commandcode: UsageStats {
+                session: b(180_000, 64_000, 900_000, 1_200_000),
+                daily: b(410_000, 150_000, 2_100_000, 3_400_000),
+                weekly: b(1_600_000, 540_000, 7_200_000, 11_000_000),
+                session_oldest: Some(now - CDuration::minutes(140)),
+                weekly_oldest: Some(now - CDuration::days(3)),
+                live_five_hour_percent: Some(28.0),
+                live_five_hour_resets_at: Some(now + CDuration::minutes(190)),
+                ..Default::default()
+            },
             oauth_connected: true,
+            cc_live: true,
         }
     }
 }
@@ -261,6 +297,32 @@ pub fn compute_claude(claude_dir: &Path, cache: &mut UsageFileCache, active: &mu
     stats
 }
 
+pub fn compute_commandcode(commandcode_dir: &Path, cache: &mut UsageFileCache, active: &mut HashSet<PathBuf>, now: DateTime<Utc>) -> UsageStats {
+    let w = Windows::at(now);
+    let mut stats = UsageStats::default();
+    let mut seen = HashSet::new();
+    let Ok(slugs) = fs::read_dir(commandcode_dir.join("projects")) else { return stats };
+    for slug in slugs.flatten().map(|e| e.path()) {
+        for f in jsonl_in(&slug).filter(|p| {
+            !p.file_name().and_then(|s| s.to_str()).unwrap_or("").contains("checkpoint") && w.recent(p)
+        }) {
+            if let Some(entries) = cache.entries(&f, commandcode::parse_usage_line) {
+                fold(entries, &w, &mut seen, &mut stats);
+            }
+            active.insert(f);
+        }
+    }
+    stats
+}
+
+pub fn compute_cursor(cursor_home: &Path, now: DateTime<Utc>) -> UsageStats {
+    let w = Windows::at(now);
+    let mut stats = UsageStats::default();
+    let mut seen = HashSet::new();
+    fold(&cursor::request_entries(cursor_home), &w, &mut seen, &mut stats);
+    stats
+}
+
 pub fn compute_agy(gemini_dir: &Path, cache: &mut UsageFileCache, active: &mut HashSet<PathBuf>, now: DateTime<Utc>) -> UsageStats {
     let w = Windows::at(now);
     let mut stats = UsageStats::default();
@@ -309,6 +371,18 @@ pub fn parse_oauth(obj: &serde_json::Value) -> OAuthUsage {
     OAuthUsage { five_hour_percent: fh, five_hour_resets_at: fha, seven_day_percent: sd, seven_day_resets_at: sda }
 }
 
+fn fetch_commandcode_live(token: &str) -> Option<(Option<f64>, Option<DateTime<Utc>>, Option<f64>, Option<DateTime<Utc>>)> {
+    let resp = crate::platform::http::agent()
+        .get("https://api.commandcode.ai/alpha/usage/summary")
+        .timeout(Duration::from_secs(5))
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("Accept", "application/json")
+        .call()
+        .ok()?;
+    let obj: serde_json::Value = resp.into_json().ok()?;
+    Some(commandcode::parse_live_windows(&obj))
+}
+
 fn fetch_oauth(token: &str) -> Option<OAuthUsage> {
     let resp = crate::platform::http::agent()
         .get("https://api.anthropic.com/api/oauth/usage")
@@ -330,7 +404,13 @@ pub fn refresh_now() {
     }
 }
 
-pub fn spawn(ctx: egui::Context, claude_dir: PathBuf, gemini_dir: PathBuf) -> watch::Receiver<UsageSnapshot> {
+pub fn spawn(
+    ctx: egui::Context,
+    claude_dir: PathBuf,
+    gemini_dir: PathBuf,
+    cursor_home: PathBuf,
+    commandcode_dir: PathBuf,
+) -> watch::Receiver<UsageSnapshot> {
     let (tx, rx) = watch::channel(UsageSnapshot::default());
     let (rtx, rrx) = mpsc::channel();
     let _ = REFRESH.set(Mutex::new(rtx));
@@ -341,6 +421,8 @@ pub fn spawn(ctx: egui::Context, claude_dir: PathBuf, gemini_dir: PathBuf) -> wa
             let mut active = HashSet::new();
             let mut claude = compute_claude(&claude_dir, &mut cache, &mut active, now);
             let agy = compute_agy(&gemini_dir, &mut cache, &mut active, now);
+            let cursor = compute_cursor(&cursor_home, now);
+            let mut commandcode = compute_commandcode(&commandcode_dir, &mut cache, &mut active, now);
             cache.prune(&active);
             if let Some(o) = read_credentials_token(&claude_dir).and_then(|t| fetch_oauth(&t)) {
                 claude.live_five_hour_percent = o.five_hour_percent;
@@ -348,8 +430,16 @@ pub fn spawn(ctx: egui::Context, claude_dir: PathBuf, gemini_dir: PathBuf) -> wa
                 claude.live_seven_day_percent = o.seven_day_percent;
                 claude.live_seven_day_resets_at = o.seven_day_resets_at;
             }
+            let mut cc_live = false;
+            if let Some((fh, fha, sd, sda)) = commandcode::read_api_key(&commandcode_dir).and_then(|t| fetch_commandcode_live(&t)) {
+                commandcode.live_five_hour_percent = fh;
+                commandcode.live_five_hour_resets_at = fha;
+                commandcode.live_seven_day_percent = sd;
+                commandcode.live_seven_day_resets_at = sda;
+                cc_live = fh.is_some() || sd.is_some();
+            }
             let oauth_connected = claude.live_five_hour_percent.is_some() || claude.live_seven_day_percent.is_some();
-            let _ = tx.send(UsageSnapshot { claude, agy, oauth_connected });
+            let _ = tx.send(UsageSnapshot { claude, agy, cursor, commandcode, oauth_connected, cc_live });
             ctx.request_repaint();
             if tx.is_closed() {
                 break;
@@ -447,5 +537,24 @@ mod tests {
         assert!(o.five_hour_resets_at.is_some());
         assert_eq!(o.seven_day_percent, Some(10.0));
         assert!(o.seven_day_resets_at.is_none());
+    }
+
+    #[test]
+    fn commandcode_windows_from_jsonl() {
+        let root = tmpdir("cc");
+        let proj = root.join("projects/demo");
+        fs::create_dir_all(&proj).unwrap();
+        let now = Utc::now();
+        let line = format!(
+            r#"{{"type":"message","id":"x1","timestamp":"{}","usage":{{"inputTokens":40,"outputTokens":5,"cacheReadTokens":20,"cacheWriteTokens":0}}}}"#,
+            (now - CDuration::minutes(3)).to_rfc3339()
+        );
+        fs::write(proj.join("s.jsonl"), format!("{line}\n")).unwrap();
+        let mut cache = UsageFileCache::default();
+        let mut active = HashSet::new();
+        let st = compute_commandcode(&root, &mut cache, &mut active, now);
+        assert_eq!(st.session.input, 40);
+        assert_eq!(st.session.output, 5);
+        let _ = fs::remove_dir_all(&root);
     }
 }

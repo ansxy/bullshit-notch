@@ -101,6 +101,14 @@ pub struct Prefs {
     pub claude_weekly_limit: u64,
     pub agy_daily_limit: u64,
     pub agy_weekly_limit: u64,
+    pub cursor_daily_limit: u64,
+    pub cursor_weekly_limit: u64,
+    pub commandcode_daily_limit: u64,
+    pub commandcode_weekly_limit: u64,
+    pub usage_claude: bool,
+    pub usage_antigravity: bool,
+    pub usage_cursor: bool,
+    pub usage_commandcode: bool,
     pub theme: NotchTheme,
     pub glass_material: GlassMaterial,
     pub glass_blur_opacity: f32,
@@ -150,6 +158,14 @@ impl Default for Prefs {
             claude_weekly_limit: 90_000_000,
             agy_daily_limit: 8_000_000,
             agy_weekly_limit: 50_000_000,
+            cursor_daily_limit: 150,
+            cursor_weekly_limit: 500,
+            commandcode_daily_limit: 8_000_000,
+            commandcode_weekly_limit: 50_000_000,
+            usage_claude: true,
+            usage_antigravity: true,
+            usage_cursor: true,
+            usage_commandcode: true,
             theme: NotchTheme::Glass,
             glass_material: GlassMaterial::UltraThin,
             glass_blur_opacity: 0.90,
@@ -205,6 +221,48 @@ impl Prefs {
         let json = serde_json::to_string_pretty(self)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         fs::write(path, json)
+    }
+
+    pub fn harness_enabled(&self, h: crate::stores::agents::Harness) -> bool {
+        use crate::stores::agents::Harness::*;
+        match h {
+            Claude => self.usage_claude,
+            Antigravity => self.usage_antigravity,
+            Cursor => self.usage_cursor,
+            CommandCode => self.usage_commandcode,
+        }
+    }
+
+    pub fn limits_for(&self, h: crate::stores::agents::Harness) -> (u64, u64) {
+        use crate::stores::agents::Harness::*;
+        match h {
+            Claude => (self.claude_daily_limit, self.claude_weekly_limit),
+            Antigravity => (self.agy_daily_limit, self.agy_weekly_limit),
+            Cursor => (self.cursor_daily_limit, self.cursor_weekly_limit),
+            CommandCode => (self.commandcode_daily_limit, self.commandcode_weekly_limit),
+        }
+    }
+
+    pub fn set_limits(&mut self, h: crate::stores::agents::Harness, session: u64, weekly: u64) {
+        use crate::stores::agents::Harness::*;
+        match h {
+            Claude => {
+                self.claude_daily_limit = session;
+                self.claude_weekly_limit = weekly;
+            }
+            Antigravity => {
+                self.agy_daily_limit = session;
+                self.agy_weekly_limit = weekly;
+            }
+            Cursor => {
+                self.cursor_daily_limit = session;
+                self.cursor_weekly_limit = weekly;
+            }
+            CommandCode => {
+                self.commandcode_daily_limit = session;
+                self.commandcode_weekly_limit = weekly;
+            }
+        }
     }
 
     /// Legacy inflated defaults migrate automatically to current tiers.

@@ -3,7 +3,7 @@ use crate::fire::Fire;
 use crate::platform::tray::{self, TrayAction, TrayHandle};
 use crate::platform::{self, Overlay};
 use crate::shape::Spring;
-use crate::stores::agents::{AgentParseState, AgentSnapshot, Harness};
+use crate::stores::agents::{AgentParseState, AgentSnapshot};
 use crate::stores::antigravity::AntigravitySessions;
 use crate::stores::battery::BatterySnapshot;
 use crate::stores::hud::HudSnapshot;
@@ -86,6 +86,7 @@ pub struct BullshitNotchApp {
 
 impl BullshitNotchApp {
     pub fn new(cc: &eframe::CreationContext<'_>, demo: bool) -> Self {
+        let pin_open = std::env::args().any(|a| a == "--open");
         let prefs = Prefs::load();
         let (tx, rx) = watch::channel(if demo {
             AgentSnapshot::demo()
@@ -120,7 +121,16 @@ impl BullshitNotchApp {
                     let mut state = AgentParseState::default();
                     let mut agy = AntigravitySessions::default();
                     loop {
-                        let snap = crate::stores::agents::refresh_all(&claude_dir, &gemini_dir, &mut state, &mut agy);
+                        let cursor_dir = dirs_home().join(".cursor");
+                        let commandcode_dir = dirs_home().join(".commandcode");
+                        let snap = crate::stores::agents::refresh_all(
+                            &claude_dir,
+                            &gemini_dir,
+                            &cursor_dir,
+                            &commandcode_dir,
+                            &mut state,
+                            &mut agy,
+                        );
                         let _ = tx.send(snap);
                         ctx.request_repaint();
                         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -133,7 +143,13 @@ impl BullshitNotchApp {
         let usage_rx = if demo {
             crate::stores::fixed(UsageSnapshot::demo())
         } else {
-            crate::stores::usage::spawn(cc.egui_ctx.clone(), dirs_claude(), dirs_home().join(".gemini"))
+            crate::stores::usage::spawn(
+                cc.egui_ctx.clone(),
+                dirs_claude(),
+                dirs_home().join(".gemini"),
+                dirs_home().join(".cursor"),
+                dirs_home().join(".commandcode"),
+            )
         };
         let shelf_rx = crate::stores::shelf::spawn(demo);
         let agenda_rx = crate::stores::agenda::spawn(cc.egui_ctx.clone(), demo);
@@ -153,9 +169,16 @@ impl BullshitNotchApp {
             github_rx,
             work_rx,
             containers_rx,
-            // Swift demo opens on the Claude filter to show the limits card.
-            ui_state: ui::UiState { agent_filter: demo.then_some(Harness::Claude), ..Default::default() },
-            pin_open: std::env::args().any(|a| a == "--open"),
+            ui_state: ui::UiState {
+                // `--demo --open`: land on Agents so usage pills/cards are screenshotable.
+                tab: if demo && pin_open {
+                    ui::NotchTab::Workspace
+                } else {
+                    ui::NotchTab::Home
+                },
+                ..Default::default()
+            },
+            pin_open,
             tray: tray::spawn(),
             prefs,
             overlay: Overlay::new(),
@@ -203,7 +226,11 @@ impl eframe::App for BullshitNotchApp {
         self.pin_top_center(ctx);
 
         let snap = self.agents_rx.borrow().clone();
-        let busy = snap.busy_count();
+        let busy = snap
+            .agents
+            .iter()
+            .filter(|a| a.status.as_deref() == Some("busy") && self.prefs.harness_enabled(a.harness))
+            .count();
         let burning = (self.prefs.live_agents && busy > 0)
             || self.prefs.agent_animation_always_on
             || (self.demo && busy > 0);
@@ -389,20 +416,14 @@ impl BullshitNotchApp {
         match action {
             ui::Action::Media(cmd) => crate::stores::now_playing::send(cmd),
             ui::Action::SetLimits(h, session, weekly) => {
-                match h {
-                    Harness::Claude => {
-                        self.prefs.claude_daily_limit = session;
-                        self.prefs.claude_weekly_limit = weekly;
-                    }
-                    Harness::Antigravity => {
-                        self.prefs.agy_daily_limit = session;
-                        self.prefs.agy_weekly_limit = weekly;
-                    }
-                }
+                self.prefs.set_limits(h, session, weekly);
                 let _ = self.prefs.save();
             }
             ui::Action::RefreshUsage => crate::stores::usage::refresh_now(),
-            ui::Action::ShelfAdd(paths) => crate::stores::shelf::add(paths),
+            ui::Action::ShelfAdd(paths) => {
+                crate::stores::shelf::add(paths);
+                self.ui_state.tab = ui::NotchTab::Shelf;
+            }
             ui::Action::ShelfRemove(path) => crate::stores::shelf::remove(&path),
             ui::Action::ShelfClear => crate::stores::shelf::clear(),
             ui::Action::Reveal(path) => platform::process::reveal_path(&path),

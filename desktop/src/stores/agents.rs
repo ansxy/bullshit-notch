@@ -11,15 +11,20 @@ pub enum Harness {
     #[default]
     Claude,
     Antigravity,
+    Cursor,
+    #[serde(alias = "cmd", alias = "command-code", alias = "command_code")]
+    CommandCode,
 }
 
 impl Harness {
-    pub const ALL: [Harness; 2] = [Harness::Claude, Harness::Antigravity];
+    pub const ALL: [Harness; 4] = [Harness::Claude, Harness::Antigravity, Harness::Cursor, Harness::CommandCode];
 
     pub fn tag(self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Antigravity => "agy",
+            Self::Cursor => "cursor",
+            Self::CommandCode => "cmd",
         }
     }
 
@@ -27,18 +32,27 @@ impl Harness {
         match self {
             Self::Claude => "Claude",
             Self::Antigravity => "Antigravity",
+            Self::Cursor => "Cursor",
+            Self::CommandCode => "Command Code",
         }
     }
 
-    /// Matches `Harness.color` in Swift.
+    /// Matches `Harness.color` in Swift, plus Cursor / Command Code.
     pub fn color(self) -> egui::Color32 {
         match self {
             Self::Claude => egui::Color32::from_rgb(255, 149, 0),
             Self::Antigravity => egui::Color32::from_rgb(50, 215, 230),
+            Self::Cursor => egui::Color32::from_rgb(130, 140, 255),
+            Self::CommandCode => egui::Color32::from_rgb(255, 90, 120),
         }
     }
 
-    /// (title, 5h limit, weekly limit) in effective tokens.
+    /// Cursor bars count unique `requestId`s, not tokens.
+    pub fn usage_is_requests(self) -> bool {
+        matches!(self, Self::Cursor)
+    }
+
+    /// (title, 5h limit, weekly limit) in effective tokens — or requests for Cursor.
     pub fn limit_presets(self) -> &'static [(&'static str, u64, u64)] {
         match self {
             Self::Claude => &[
@@ -49,6 +63,18 @@ impl Harness {
             ],
             Self::Antigravity => &[
                 ("Standard (3M 5h / 20M wk)", 3_000_000, 20_000_000),
+                ("Pro (8M 5h / 50M wk)", 8_000_000, 50_000_000),
+                ("Heavy (20M 5h / 120M wk)", 20_000_000, 120_000_000),
+                ("Max (50M 5h / 300M wk)", 50_000_000, 300_000_000),
+            ],
+            Self::Cursor => &[
+                ("Hobby (50 / 5h, 200 wk)", 50, 200),
+                ("Pro (150 / 5h, 500 wk)", 150, 500),
+                ("Pro+ (500 / 5h, 2K wk)", 500, 2_000),
+                ("Unlimited (5K / 20K)", 5_000, 20_000),
+            ],
+            Self::CommandCode => &[
+                ("Starter (2M 5h / 12M wk)", 2_000_000, 12_000_000),
                 ("Pro (8M 5h / 50M wk)", 8_000_000, 50_000_000),
                 ("Heavy (20M 5h / 120M wk)", 20_000_000, 120_000_000),
                 ("Max (50M 5h / 300M wk)", 50_000_000, 300_000_000),
@@ -151,10 +177,32 @@ impl AgentSnapshot {
                 started_at: now_ms - 640_000.0,
                 status_updated_at: Some(now_ms - 45_000.0),
             },
+            Agent {
+                harness: Harness::Cursor,
+                pid: 42072,
+                session_id: "demo-4".into(),
+                cwd: "/home/dev/work/bullshit-notch".into(),
+                name: Some("Desktop Cursor + CommandCode usage".into()),
+                status: Some("busy".into()),
+                started_at: now_ms - 310_000.0,
+                status_updated_at: Some(now_ms - 8_000.0),
+            },
+            Agent {
+                harness: Harness::CommandCode,
+                pid: 42073,
+                session_id: "demo-5".into(),
+                cwd: "/home/dev/work/fan-control".into(),
+                name: Some("Learn taste from cooling scripts".into()),
+                status: Some("idle".into()),
+                started_at: now_ms - 1_400_000.0,
+                status_updated_at: Some(now_ms - 120_000.0),
+            },
         ];
         snap.tokens.insert("demo-1".into(), (142_000, 48_500));
         snap.tokens.insert("demo-2".into(), (96_000, 31_000));
         snap.tokens.insert("demo-3".into(), (210_000, 64_000));
+        snap.tokens.insert("demo-4".into(), (38, 12));
+        snap.tokens.insert("demo-5".into(), (84_000, 19_000));
         snap.subagents.insert(
             "demo-1".into(),
             vec![
@@ -336,15 +384,25 @@ fn slugify_cwd(cwd: &str) -> String {
         .collect()
 }
 
-/// Claude + Antigravity sessions, newest first.
+/// Claude + Antigravity + Cursor + Command Code sessions, newest first.
 pub fn refresh_all(
     claude_dir: &Path,
     gemini_dir: &Path,
+    cursor_dir: &Path,
+    commandcode_dir: &Path,
     state: &mut AgentParseState,
     agy: &mut super::antigravity::AntigravitySessions,
 ) -> AgentSnapshot {
     let mut snap = refresh_from_dirs(claude_dir, state);
     for (agent, tokens) in agy.refresh(gemini_dir) {
+        snap.tokens.insert(agent.session_id.clone(), tokens);
+        snap.agents.push(agent);
+    }
+    for (agent, tokens) in super::cursor::refresh(cursor_dir) {
+        snap.tokens.insert(agent.session_id.clone(), tokens);
+        snap.agents.push(agent);
+    }
+    for (agent, tokens) in super::commandcode::refresh(commandcode_dir) {
         snap.tokens.insert(agent.session_id.clone(), tokens);
         snap.agents.push(agent);
     }

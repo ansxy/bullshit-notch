@@ -357,6 +357,9 @@ fn draw_expanded(
         Pos2::new(rect.min.x + pad_x, rect.min.y + pad_top),
         Pos2::new(rect.max.x - pad_x, rect.max.y - pad_bot),
     );
+    if !inner.is_positive() {
+        return;
+    }
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(inner), |ui| {
         ui.set_clip_rect(inner.expand(2.0));
         ui.spacing_mut().item_spacing = Vec2::new(6.0, 4.0);

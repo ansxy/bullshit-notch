@@ -4,6 +4,14 @@ use super::View;
 use crate::stores::hud::HudKind;
 use eframe::egui::{self, Color32, Pos2, Rect, Rounding, Shape, Stroke, Vec2};
 
+pub fn enabled_busy(v: &View) -> usize {
+    v.agents
+        .agents
+        .iter()
+        .filter(|a| a.status.as_deref() == Some("busy") && v.prefs.harness_enabled(a.harness))
+        .count()
+}
+
 /// What shows beside the closed notch, highest priority first.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Activity {
@@ -21,7 +29,7 @@ pub fn activity(v: &View) -> Activity {
         Activity::Battery
     } else if v.prefs.live_music && v.music.playing {
         Activity::Music
-    } else if v.prefs.live_agents && v.agents.busy_count() > 0 {
+    } else if v.prefs.live_agents && enabled_busy(v) > 0 {
         Activity::Agents
     } else {
         Activity::None
