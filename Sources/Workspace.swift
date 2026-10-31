@@ -11,6 +11,7 @@ struct WorkspaceView: View {
     @AppStorage(Pref.sectionContainers) private var showContainers = true
     @AppStorage(Pref.sectionAgents) private var showAgents = true
     @AppStorage(Pref.sectionQA) private var showQA = true
+    @AppStorage(Pref.sectionProcs) private var showProcs = true
     @AppStorage(Pref.musicAmbient) private var musicAmbient = true
     @State private var section: Tab = CommandLine.arguments.contains("--demo") ? .builtin(.agents) : .builtin(.git)
     @State private var adding = false
@@ -30,6 +31,7 @@ struct WorkspaceView: View {
             case .containers: return showContainers
             case .agents:     return showAgents
             case .qa:         return showQA
+            case .procs:      return showProcs
             }
         }
     }
@@ -154,6 +156,8 @@ struct WorkspaceView: View {
             AgentsView().notchCard()
         case .builtin(.qa):
             QARecorderView().notchCard()
+        case .builtin(.procs):
+            ProcsView().notchCard()
         case .custom(let id):
             CustomSectionView(sectionID: id).notchCard()
         case nil:
