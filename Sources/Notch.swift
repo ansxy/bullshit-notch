@@ -25,12 +25,16 @@ final class NotchController: NSObject, NSApplicationDelegate {
         _ = (Battery.shared, NowPlaying.shared)  // start listening right away
         HUD.shared.setEnabled(UserDefaults.standard.bool(forKey: Pref.replaceHUD))
 
-        // Menu bar icon: one click opens settings (a MenuBarExtra would always open a dropdown).
-        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "BullshitNotch settings")
+        // Menu bar icon: custom Notch silhouette (left-click opens Studio window; right-click opens Quick Actions).
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.target = self
-        item.button?.action = #selector(openSettings)
+        item.button?.action = #selector(statusItemClicked(_:))
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem = item
+        refreshStatusItemIcon()
+        NotificationCenter.default.addObserver(forName: .menuBarIconStyleDidChange, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshStatusItemIcon() }
+        }
 
         let size = NSSize(width: 760, height: 820)  // room for the fully expanded panel
         panel = KeyablePanel(
@@ -281,8 +285,83 @@ final class NotchController: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func refreshStatusItemIcon() {
+        guard let item = statusItem else { return }
+        let raw = UserDefaults.standard.string(forKey: Pref.menuBarIconStyle) ?? MenuBarIconStyle.notchBezel.rawValue
+        let style = MenuBarIconStyle(rawValue: raw) ?? .notchBezel
+        if style == .hidden {
+            item.isVisible = false
+        } else {
+            item.isVisible = true
+            item.button?.image = MenuBarIconGenerator.image(for: style)
+            item.button?.toolTip = "BullshitNotch Studio (Right-click for Quick Actions)"
+        }
+    }
+
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        if let event = NSApp.currentEvent, event.type == .rightMouseUp {
+            showStatusItemQuickMenu(from: sender)
+        } else {
+            NotchSettingsWindow.show()
+        }
+    }
+
+    private func showStatusItemQuickMenu(from button: NSStatusBarButton) {
+        let menu = NSMenu()
+
+        let studioItem = NSMenuItem(title: "Open Studio Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        studioItem.target = self
+        menu.addItem(studioItem)
+
+        let inNotchItem = NSMenuItem(title: "Open In-Notch Studio Drawer", action: #selector(openInNotchStudio), keyEquivalent: "")
+        inNotchItem.target = self
+        menu.addItem(inNotchItem)
+
+        menu.addItem(.separator())
+
+        let pinItem = NSMenuItem(title: "Pin Notch Open", action: #selector(togglePinNotch), keyEquivalent: "")
+        pinItem.target = self
+        pinItem.state = model.pinnedPreview ? .on : .off
+        menu.addItem(pinItem)
+
+        let shaderAlwaysOn = UserDefaults.standard.bool(forKey: Pref.agentAnimationAlwaysOn)
+        let shaderItem = NSMenuItem(title: "Always Play Agent Shader", action: #selector(toggleShaderAlwaysOn), keyEquivalent: "")
+        shaderItem.target = self
+        shaderItem.state = shaderAlwaysOn ? .on : .off
+        menu.addItem(shaderItem)
+
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(title: "Quit BullshitNotch", action: #selector(quitApp), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
+
+        statusItem?.menu = menu
+        button.performClick(nil)
+        statusItem?.menu = nil
+    }
+
     @objc private func openSettings() {
         NotchSettingsWindow.show()
+    }
+
+    @objc private func openInNotchStudio() {
+        model.showInNotchSettings = true
+        model.pinnedPreview = true
+        model.setExpanded(true)
+    }
+
+    @objc private func togglePinNotch() {
+        model.pinnedPreview.toggle()
+    }
+
+    @objc private func toggleShaderAlwaysOn() {
+        let cur = UserDefaults.standard.bool(forKey: Pref.agentAnimationAlwaysOn)
+        UserDefaults.standard.set(!cur, forKey: Pref.agentAnimationAlwaysOn)
+    }
+
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
     }
 
     /// Open when the pointer reaches the black shape (or a file is dragged onto it); close when it leaves.
@@ -316,7 +395,18 @@ final class NotchController: NSObject, NSApplicationDelegate {
         let inside = shape.insetBy(dx: -4, dy: -4).contains(NSEvent.mouseLocation)
         panel.ignoresMouseEvents = !inside
         let openOnHover = UserDefaults.standard.bool(forKey: Pref.openOnHover)
-        if inside && !model.expanded && (openOnHover || type == .leftMouseDragged) { model.setExpanded(true) }
+        if inside && !model.expanded && (openOnHover || type == .leftMouseDragged) {
+            if let alert = ProcsStore.shared.activeAlert {
+                model.tab = .topbar
+                model.setExpanded(true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    NotificationCenter.default.post(name: Notification.Name("DemoSwitchSection"), object: alert.targetSection)
+                    ProcsStore.shared.clearAlert()
+                }
+            } else {
+                model.setExpanded(true)
+            }
+        }
         if !inside && model.expanded { model.setExpanded(false) }
     }
 
@@ -385,6 +475,7 @@ final class NotchModel: ObservableObject {
         didSet { setExpanded(pinnedPreview) }
     }
     @Published var tab = NotchTab.home
+    @Published var showInNotchSettings = false
     /// Laid-out size of the black shape, for hit-testing the pointer (not published: layout writes it).
     var shapeSize: CGSize
 
@@ -397,6 +488,9 @@ final class NotchModel: ObservableObject {
         // Opening overshoots a little so the drop wobbles like liquid; closing stays crisp.
         withAnimation(on ? .spring(response: 0.45, dampingFraction: 0.62) : .spring(response: 0.32, dampingFraction: 0.9)) {
             expanded = on
+            if !on {
+                showInNotchSettings = false
+            }
         }
     }
 }
@@ -408,6 +502,7 @@ private struct NotchView: View {
     @ObservedObject private var battery = Battery.shared
     @ObservedObject private var hud = HUD.shared
     @ObservedObject private var qa = QARecorderStore.shared
+    @ObservedObject private var procs = ProcsStore.shared
     @AppStorage(Pref.liveAgents) private var liveAgents = true
     @AppStorage(Pref.liveMusic) private var liveMusic = true
     @AppStorage(Pref.liveBattery) private var liveBattery = true
@@ -472,9 +567,10 @@ private struct NotchView: View {
     /// The selected tab, or the first visible one if it was just switched off.
     private var currentTab: NotchTab { visibleTabs.contains(model.tab) ? model.tab : visibleTabs[0] }
 
-    /// Wing width: constant across idle, agent-running, and music/HUD/battery states so the closed notch stays one width and height.
+    /// Wing width: constant across idle, agent-running, and music/HUD/battery states, widening briefly for process alerts.
     private var wing: CGFloat {
-        max(0, idleWidth / 2)
+        let base = max(0, idleWidth / 2)
+        return procs.activeAlert != nil ? max(base, 64) : base
     }
 
     /// Closed: a tight notch. Open: smooth water-drop/slime meniscus at top corners, straight sides, rounded bottom.
@@ -489,10 +585,11 @@ private struct NotchView: View {
     }
 
     /// What shows beside the closed notch, highest priority first.
-    private enum Activity { case none, hud, battery, agents, music }
+    private enum Activity { case none, hud, battery, procAlert, agents, music }
     private var activity: Activity {
         if hud.visible { return .hud }
         if liveBattery && battery.justChanged { return .battery }
+        if procs.activeAlert != nil { return .procAlert }
         if liveMusic && music.playing { return .music }
         if liveAgents && agents.busyCount > 0 { return .agents }
         return .none
@@ -679,6 +776,8 @@ private struct NotchView: View {
     /// Glow colour from the live activity: the animation's colour, the album art, the charger, the HUD.
     private var accent: Color? {
         switch activity {
+        case .procAlert:
+            return (procs.activeAlert?.succeeded ?? true) ? .green : .red
         case .agents:  return Color(nsColor: agents.fire.accent(for: currentAnimationStyle))
         case .music:   return music.tint.map { Color(nsColor: $0) } ?? .white
         case .battery: return .green
@@ -726,7 +825,18 @@ private struct NotchView: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { model.setExpanded(true) }  // for when "open on hover" is off
+        .onTapGesture {
+            if let alert = procs.activeAlert {
+                model.tab = .topbar
+                model.setExpanded(true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                    NotificationCenter.default.post(name: Notification.Name("DemoSwitchSection"), object: alert.targetSection)
+                    procs.clearAlert()
+                }
+            } else {
+                model.setExpanded(true)
+            }
+        }  // for when "open on hover" is off
         .animation(.spring(response: 0.35, dampingFraction: 0.8), value: agentsBurning)
     }
 
@@ -741,6 +851,19 @@ private struct NotchView: View {
             Image(systemName: battery.pluggedIn ? "bolt.fill" : "powerplug")
                 .font(.system(size: min(13, max(8, notch.height - 6))))
                 .foregroundStyle(battery.pluggedIn ? .green : .white)
+        case .procAlert:
+            if let alert = procs.activeAlert {
+                HStack(spacing: 4) {
+                    Image(systemName: alert.succeeded ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                        .font(.system(size: min(12, max(8, notch.height - 8)), weight: .bold))
+                        .foregroundStyle(alert.succeeded ? .green : .red)
+                    Text(alert.title)
+                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 4)
+            }
         case .agents:
             EmptyView()  // vacant wing slot reserved for future use
         case .music:
@@ -758,6 +881,19 @@ private struct NotchView: View {
         case .battery:
             BatteryLabel(battery: battery)
                 .scaleEffect(min(1.0, max(0.65, (notch.height - 2) / 22.0)))
+        case .procAlert:
+            if let alert = procs.activeAlert {
+                Text(alert.badge)
+                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(alert.succeeded ? .green : Color(red: 1.0, green: 0.45, blue: 0.45))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill((alert.succeeded ? Color.green : Color.red).opacity(0.2))
+                    )
+                    .lineLimit(1)
+            }
         case .agents:
             EmptyView()  // vacant wing slot reserved for future use
         case .music:
@@ -779,15 +915,32 @@ private struct NotchView: View {
         VStack(spacing: 0) {
             header
             Group {
-                switch currentTab {
-                case .home:
-                    HomeView()
-                case .shelf:
-                    ShelfView()
-                case .topbar:
-                    WorkspaceView()
-                        .environmentObject(TopBarApp.store)
-                        .environmentObject(TopBarApp.custom)
+                if model.showInNotchSettings {
+                    NotchSettingsView(
+                        embeddedInNotch: true,
+                        onCloseEmbedded: {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                model.showInNotchSettings = false
+                            }
+                        },
+                        onPopOutWindow: {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                model.showInNotchSettings = false
+                            }
+                            NotchSettingsWindow.show()
+                        }
+                    )
+                } else {
+                    switch currentTab {
+                    case .home:
+                        HomeView()
+                    case .shelf:
+                        ShelfView()
+                    case .topbar:
+                        WorkspaceView()
+                            .environmentObject(TopBarApp.store)
+                            .environmentObject(TopBarApp.custom)
+                    }
                 }
             }
             .padding(.top, 8)
@@ -802,14 +955,18 @@ private struct NotchView: View {
         HStack(spacing: 0) {
             HStack(spacing: 4) {
                 ForEach(visibleTabs, id: \.self) { tab in
+                    let isTabSelected = !model.showInNotchSettings && currentTab == tab
                     Button {
-                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { model.tab = tab }
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                            model.showInNotchSettings = false
+                            model.tab = tab
+                        }
                     } label: {
                         Image(systemName: tab.icon)
                             .frame(width: 32, height: 24)
-                            .foregroundStyle(currentTab == tab ? .white : .white.opacity(0.55))
+                            .foregroundStyle(isTabSelected ? .white : .white.opacity(0.55))
                             .background {
-                                if currentTab == tab {
+                                if isTabSelected {
                                     if let palette = musicPalette {
                                         Capsule()
                                             .fill(
@@ -839,11 +996,35 @@ private struct NotchView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Color.clear.frame(width: model.notch.width)
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 if battery.hasBattery { BatteryLabel(battery: battery) }
-                Button { NotchSettingsWindow.show() } label: { Image(systemName: "gearshape.fill") }
-                    .buttonStyle(.plain)
-                    .help("Settings")
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.82)) {
+                        model.showInNotchSettings.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                        if model.showInNotchSettings {
+                            Text("Studio")
+                                .font(.system(size: 10.5, weight: .semibold))
+                        }
+                    }
+                    .foregroundStyle(model.showInNotchSettings ? Color.cyan : .white.opacity(0.85))
+                    .padding(.horizontal, model.showInNotchSettings ? 8 : 6)
+                    .padding(.vertical, 4)
+                    .background {
+                        if model.showInNotchSettings {
+                            Capsule()
+                                .fill(Color.cyan.opacity(0.18))
+                                .overlay(Capsule().strokeBorder(Color.cyan.opacity(0.45), lineWidth: 0.9))
+                        }
+                    }
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Toggle In-Notch Studio Settings")
             }
             .frame(maxWidth: .infinity, alignment: .trailing)
         }
