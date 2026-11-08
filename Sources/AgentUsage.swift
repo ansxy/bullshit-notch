@@ -252,7 +252,6 @@ final class AgentUsageTracker: ObservableObject {
 
     /// Reads Claude Code's OAuth token from macOS Keychain on user request and fetches live `/usage`.
     func syncClaudeKeychain() {
-        isRefreshing = true
         Task.detached(priority: .userInitiated) {
             let token = Self.readClaudeKeychainToken()
             await MainActor.run {

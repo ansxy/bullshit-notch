@@ -225,14 +225,23 @@ final class ProjectStore: ObservableObject {
             }
         }
 
+        let projectName = item.name
         proc.terminationHandler = { finished in
             pipe.fileHandleForReading.readabilityHandler = nil
             let status = finished.terminationStatus
             Task { @MainActor in
                 let store = ProjectStore.shared
-                store.processes.removeValue(forKey: id)
+                let exitedNaturally = store.processes.removeValue(forKey: id) != nil
                 store.runningIDs.remove(id)
                 store.lastExitCode[id] = status
+                if exitedNaturally {
+                    ProcsStore.shared.triggerAlert(
+                        title: projectName,
+                        badge: status == 0 ? "Done" : "Exit \(status)",
+                        succeeded: status == 0,
+                        targetSection: .work
+                    )
+                }
             }
         }
 

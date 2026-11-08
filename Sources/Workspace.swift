@@ -7,10 +7,12 @@ struct WorkspaceView: View {
     @EnvironmentObject private var custom: CustomStore
     @ObservedObject private var music = NowPlaying.shared
     @AppStorage(Pref.sectionGit) private var showGit = true
+    @AppStorage(Pref.sectionPlane) private var showPlane = true
     @AppStorage(Pref.sectionWork) private var showWork = true
     @AppStorage(Pref.sectionContainers) private var showContainers = true
     @AppStorage(Pref.sectionAgents) private var showAgents = true
     @AppStorage(Pref.sectionQA) private var showQA = true
+    @AppStorage(Pref.sectionProcs) private var showProcs = true
     @AppStorage(Pref.musicAmbient) private var musicAmbient = true
     @State private var section: Tab = CommandLine.arguments.contains("--demo") ? .builtin(.agents) : .builtin(.git)
     @State private var adding = false
@@ -26,10 +28,12 @@ struct WorkspaceView: View {
         AppSection.allCases.filter {
             switch $0 {
             case .git:        return showGit
+            case .plane:      return showPlane
             case .work:       return showWork
             case .containers: return showContainers
             case .agents:     return showAgents
             case .qa:         return showQA
+            case .procs:      return showProcs
             }
         }
     }
@@ -108,7 +112,7 @@ struct WorkspaceView: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { section = tab }
         } label: {
             Label(label, systemImage: icon)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 8.5)
                 .padding(.vertical, 5)
                 .background {
                     if current == tab {
@@ -146,6 +150,8 @@ struct WorkspaceView: View {
                 PRColumn(list: .mine)
                 PRColumn(list: .review)
             }
+        case .builtin(.plane):
+            PlaneView().notchCard()
         case .builtin(.work):
             ProjectRunnerView().notchCard()
         case .builtin(.containers):
@@ -154,6 +160,8 @@ struct WorkspaceView: View {
             AgentsView().notchCard()
         case .builtin(.qa):
             QARecorderView().notchCard()
+        case .builtin(.procs):
+            ProcsView().notchCard()
         case .custom(let id):
             CustomSectionView(sectionID: id).notchCard()
         case nil:

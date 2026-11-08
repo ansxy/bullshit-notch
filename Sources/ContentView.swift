@@ -68,6 +68,8 @@ struct ContentView: View {
             subTabBar
             Divider()
             content
+        case .builtin(.plane):
+            PlaneView()
         case .builtin(.work):
             WorkView()
         case .builtin(.containers):
@@ -76,6 +78,8 @@ struct ContentView: View {
             AgentsView()
         case .builtin(.qa):
             QARecorderView()
+        case .builtin(.procs):
+            ProcsView()
         case .custom(let id):
             CustomSectionView(sectionID: id)
         }
