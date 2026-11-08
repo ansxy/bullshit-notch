@@ -25,11 +25,17 @@ enum Pref {
     static let music = "showMusic"
     static let airDrop = "showAirDrop"
     static let sectionGit = "showSectionGit"
+    static let sectionPlane = "showSectionPlane"
     static let sectionWork = "showSectionWork"
     static let sectionContainers = "showSectionContainers"
     static let sectionAgents = "showSectionAgents"
     static let sectionQA = "showSectionQA"
     static let sectionProcs = "showSectionProcs"
+    // Plane.so Self-Hosted configuration.
+    static let planeBaseURL = "planeBaseURL"
+    static let planeWorkspaceSlug = "planeWorkspaceSlug"
+    static let planeApiKey = "planeApiKey"
+    static let planeSelectedProjectID = "planeSelectedProjectID"
     // Agent limits.
     static let claudeDailyLimit = "claudeDailyLimit"
     static let claudeWeeklyLimit = "claudeWeeklyLimit"
@@ -64,7 +70,8 @@ enum Pref {
             agenda: true, mirror: true, replaceHUD: false, widthAdjust: 0.0, heightAdjust: 0.0,
             idleWidth: 48.0,
             tabHome: true, tabShelf: true, tabTopbar: true, music: true, airDrop: true,
-            sectionGit: true, sectionWork: true, sectionContainers: true, sectionAgents: true, sectionQA: true, sectionProcs: true,
+            sectionGit: true, sectionPlane: true, sectionWork: true, sectionContainers: true, sectionAgents: true, sectionQA: true, sectionProcs: true,
+            planeBaseURL: "", planeWorkspaceSlug: "", planeApiKey: "", planeSelectedProjectID: "",
             claudeDailyLimit: 12_500_000, claudeWeeklyLimit: 90_000_000,
             agyDailyLimit: 8_000_000, agyWeeklyLimit: 50_000_000,
             theme: NotchTheme.glass.rawValue,
@@ -482,11 +489,15 @@ struct NotchSettingsView: View {
     @AppStorage(Pref.music) private var music = true
     @AppStorage(Pref.airDrop) private var airDrop = true
     @AppStorage(Pref.sectionGit) private var sectionGit = true
+    @AppStorage(Pref.sectionPlane) private var sectionPlane = true
     @AppStorage(Pref.sectionWork) private var sectionWork = true
     @AppStorage(Pref.sectionContainers) private var sectionContainers = true
     @AppStorage(Pref.sectionAgents) private var sectionAgents = true
     @AppStorage(Pref.sectionQA) private var sectionQA = true
     @AppStorage(Pref.sectionProcs) private var sectionProcs = true
+    @AppStorage(Pref.planeBaseURL) private var planeBaseURL = ""
+    @AppStorage(Pref.planeWorkspaceSlug) private var planeWorkspaceSlug = ""
+    @AppStorage(Pref.planeApiKey) private var planeApiKey = ""
 
     // Theme & Glass settings
     @AppStorage(Pref.theme) private var theme = NotchTheme.glass.rawValue
@@ -1458,6 +1469,8 @@ struct NotchSettingsView: View {
                 VStack(spacing: 8) {
                     studioToggleRow(title: "Git Pull Requests", subtitle: "Assigned & review PRs via gh", isOn: $sectionGit)
                     Divider().overlay(Color.white.opacity(0.06))
+                    studioToggleRow(title: "Plane.so Tickets", subtitle: "Self-hosted Plane issues, state toggles & agent hand-off", isOn: $sectionPlane)
+                    Divider().overlay(Color.white.opacity(0.06))
                     studioToggleRow(title: "Work Project Runner", subtitle: "One-click dev server & agent launcher", isOn: $sectionWork)
                     Divider().overlay(Color.white.opacity(0.06))
                     studioToggleRow(title: "Containers", subtitle: "Docker, OrbStack & Podman", isOn: $sectionContainers)
@@ -1581,6 +1594,63 @@ struct NotchSettingsView: View {
                             )
                         }
                     }
+                }
+            }
+        }
+
+        studioSectionCard(
+            title: "Self-Hosted Plane.so Integration",
+            subtitle: "Connect your Plane instance (API v1) for the Plane Tickets workspace section",
+            icon: "paperplane.fill"
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Self-Hosted Instance URL")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                        TextField("https://plane.yourdomain.com", text: $planeBaseURL)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Workspace Slug")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                        TextField("e.g. my-team", text: $planeWorkspaceSlug)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                            .frame(width: 170)
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Personal API Token (X-API-Key)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                        SecureField("plane_api_...", text: $planeApiKey)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 11, design: .monospaced))
+                    }
+
+                    Button {
+                        Task { await PlaneStore.shared.refresh() }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 11, weight: .semibold))
+                            Text("Test & Sync")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundStyle(Color.cyan)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.cyan.opacity(0.18), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 16)
                 }
             }
         }

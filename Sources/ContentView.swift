@@ -68,6 +68,8 @@ struct ContentView: View {
             subTabBar
             Divider()
             content
+        case .builtin(.plane):
+            PlaneView()
         case .builtin(.work):
             WorkView()
         case .builtin(.containers):

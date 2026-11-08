@@ -18,6 +18,7 @@ struct PullRequest: Decodable, Identifiable {
 /// A top-level section in the menu bar panel. Selecting one reveals its sub-tabs.
 enum AppSection: String, CaseIterable, Identifiable {
     case git = "Git"
+    case plane = "Plane"
     case work = "Work"
     case containers = "Containers"
     case agents = "Agents"
@@ -28,6 +29,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     var icon: String {
         switch self {
         case .git:        return "arrow.triangle.pull"
+        case .plane:      return "paperplane.fill"
         case .work:       return "folder"
         case .containers: return "shippingbox.fill"
         case .agents:     return "sparkles"

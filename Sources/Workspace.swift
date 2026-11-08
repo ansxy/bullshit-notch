@@ -7,6 +7,7 @@ struct WorkspaceView: View {
     @EnvironmentObject private var custom: CustomStore
     @ObservedObject private var music = NowPlaying.shared
     @AppStorage(Pref.sectionGit) private var showGit = true
+    @AppStorage(Pref.sectionPlane) private var showPlane = true
     @AppStorage(Pref.sectionWork) private var showWork = true
     @AppStorage(Pref.sectionContainers) private var showContainers = true
     @AppStorage(Pref.sectionAgents) private var showAgents = true
@@ -27,6 +28,7 @@ struct WorkspaceView: View {
         AppSection.allCases.filter {
             switch $0 {
             case .git:        return showGit
+            case .plane:      return showPlane
             case .work:       return showWork
             case .containers: return showContainers
             case .agents:     return showAgents
@@ -110,7 +112,7 @@ struct WorkspaceView: View {
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { section = tab }
         } label: {
             Label(label, systemImage: icon)
-                .padding(.horizontal, 10)
+                .padding(.horizontal, 8.5)
                 .padding(.vertical, 5)
                 .background {
                     if current == tab {
@@ -148,6 +150,8 @@ struct WorkspaceView: View {
                 PRColumn(list: .mine)
                 PRColumn(list: .review)
             }
+        case .builtin(.plane):
+            PlaneView().notchCard()
         case .builtin(.work):
             ProjectRunnerView().notchCard()
         case .builtin(.containers):
